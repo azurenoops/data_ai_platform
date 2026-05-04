@@ -1,0 +1,39 @@
+# build artifacts
+bin/
+obj/
+out/
+publish/
+*.user
+*.suo
+
+# IDE
+.vs/
+.idea/
+*.swp
+
+# azd
+.azure/
+
+# secrets
+local.settings.json
+appsettings.*.local.json
+*.pfx
+*.env
+
+# tooling
+.DS_Store
+node_modules/
+coverage/
+TestResults/
+
+# function app published bundles
+/bin
+/obj
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+*.tfvars
+*.tfvars.json
+terraform.tfstate.backup

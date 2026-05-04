@@ -1,0 +1,200 @@
+name: terraform
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'infra/**'
+      - '.github/workflows/terraform.yml'
+      - '.tflint.hcl'
+  push:
+    branches: [main]
+    paths:
+      - 'infra/**'
+      - '.github/workflows/terraform.yml'
+      - '.tflint.hcl'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Terraform workspace / env (must match infra/envs/<env>.tfvars)'
+        required: true
+        default: prod
+        type: choice
+        options: [dev, prod]
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+env:
+  TF_VERSION: 1.9.8
+  TFLINT_VERSION: v0.55.1
+  TF_IN_AUTOMATION: 'true'
+  ARM_USE_OIDC: 'true'
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  WORKSPACE: ${{ github.event.inputs.environment || (github.event_name == 'pull_request' && 'dev') || 'prod' }}
+
+jobs:
+  validate:
+    name: fmt + validate + tflint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: terraform fmt
+        working-directory: infra
+        run: terraform fmt -check -recursive
+
+      - name: terraform init (no backend)
+        working-directory: infra
+        run: terraform init -backend=false -input=false
+
+      - name: terraform validate
+        working-directory: infra
+        run: terraform validate -no-color
+
+      - uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: ${{ env.TFLINT_VERSION }}
+
+      - name: tflint init
+        run: tflint --init
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: tflint
+        run: tflint --recursive --config "$(pwd)/.tflint.hcl"
+
+  plan:
+    name: plan
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: terraform init
+        working-directory: infra
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=${{ vars.TFSTATE_RESOURCE_GROUP }}" \
+            -backend-config="storage_account_name=${{ vars.TFSTATE_STORAGE_ACCOUNT }}" \
+            -backend-config="container_name=${{ vars.TFSTATE_CONTAINER }}" \
+            -backend-config="key=data-ai-mcp.tfstate" \
+            -backend-config="use_oidc=true" \
+            -input=false
+
+      - name: terraform workspace
+        working-directory: infra
+        run: |
+          terraform workspace select -or-create "${WORKSPACE}"
+
+      - name: terraform plan
+        id: plan
+        working-directory: infra
+        run: |
+          terraform plan \
+            -var-file="envs/${WORKSPACE}.tfvars" \
+            -out=tfplan \
+            -input=false \
+            -no-color
+          terraform show -no-color tfplan > tfplan.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-${{ env.WORKSPACE }}
+          path: |
+            infra/tfplan
+            infra/tfplan.txt
+          retention-days: 14
+
+      - name: Comment plan on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const planTxt = fs.readFileSync('infra/tfplan.txt', 'utf8');
+            // GitHub comment limit is 65536 chars - truncate aggressively if needed.
+            const max = 60000;
+            const body = planTxt.length > max
+              ? '<details><summary>Terraform plan (truncated; full output in workflow artifact)</summary>\n\n```\n' + planTxt.slice(0, max) + '\n... [truncated]\n```\n</details>'
+              : '<details><summary>Terraform plan</summary>\n\n```\n' + planTxt + '\n```\n</details>';
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `### Terraform plan (\`${process.env.WORKSPACE}\`)\n\n${body}`,
+            });
+
+  apply:
+    name: apply
+    needs: plan
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ github.event.inputs.environment || 'prod' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: terraform init
+        working-directory: infra
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=${{ vars.TFSTATE_RESOURCE_GROUP }}" \
+            -backend-config="storage_account_name=${{ vars.TFSTATE_STORAGE_ACCOUNT }}" \
+            -backend-config="container_name=${{ vars.TFSTATE_CONTAINER }}" \
+            -backend-config="key=data-ai-mcp.tfstate" \
+            -backend-config="use_oidc=true" \
+            -input=false
+
+      - name: terraform workspace
+        working-directory: infra
+        run: terraform workspace select -or-create "${WORKSPACE}"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: tfplan-${{ env.WORKSPACE }}
+          path: infra
+
+      - name: terraform apply
+        working-directory: infra
+        run: terraform apply -auto-approve -input=false tfplan
+
+      - name: Capture outputs
+        working-directory: infra
+        run: terraform output -json > tfout.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tfout-${{ env.WORKSPACE }}
+          path: infra/tfout.json
+          retention-days: 14

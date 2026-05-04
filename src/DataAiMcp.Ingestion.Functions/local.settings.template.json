@@ -1,0 +1,23 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
+    "AzureWebJobsStorage__accountName": "REPLACE_WITH_DEV_STORAGE_ACCOUNT",
+    "AZURE_CLIENT_ID": "",
+    "Storage__AccountName": "REPLACE_WITH_DEV_STORAGE_ACCOUNT",
+    "Storage__LandingContainer": "landing",
+    "Storage__RawContainer": "raw",
+    "Storage__CuratedContainer": "curated",
+    "Storage__ChunksContainer": "chunks",
+    "Search__Endpoint": "https://REPLACE.search.windows.net",
+    "Search__IndexName": "documents",
+    "Foundry__Endpoint": "https://REPLACE.cognitiveservices.azure.com/",
+    "Foundry__EmbeddingDeployment": "text-embedding-3-large",
+    "DocumentIntelligence__Endpoint": "https://REPLACE.cognitiveservices.azure.com/",
+    "Graph__TenantId": "REPLACE",
+    "SharePoint__DriveIds": "",
+    "SharePoint__Schedule": "0 */30 * * * *",
+    "OneDrive__DriveIds": "",
+    "OneDrive__Schedule": "0 0 */6 * * *"
+  }
+}

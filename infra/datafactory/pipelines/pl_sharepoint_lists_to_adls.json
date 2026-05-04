@@ -1,0 +1,62 @@
+{
+  "name": "pl_sharepoint_lists_to_adls",
+  "properties": {
+    "description": "Pulls SharePoint Online list rows (NOT files) via the ADF SharePoint connector and writes them as Parquet to raw/sharepoint/lists/*. Files are handled separately by the Functions Graph fetcher.",
+    "activities": [
+      {
+        "name": "ForEachList",
+        "type": "ForEach",
+        "typeProperties": {
+          "items": { "value": "@pipeline().parameters.lists", "type": "Expression" },
+          "isSequential": false,
+          "batchCount": 4,
+          "activities": [
+            {
+              "name": "CopyList",
+              "type": "Copy",
+              "inputs": [
+                {
+                  "referenceName": "ds_sharepoint_list",
+                  "type": "DatasetReference",
+                  "parameters": {
+                    "siteUrl": { "value": "@pipeline().parameters.siteUrl", "type": "Expression" },
+                    "listTitle": { "value": "@item().name", "type": "Expression" }
+                  }
+                }
+              ],
+              "outputs": [
+                {
+                  "referenceName": "ds_adls_parquet",
+                  "type": "DatasetReference",
+                  "parameters": {
+                    "container": "raw",
+                    "folder": { "value": "@concat('sharepoint/lists/', item().name)", "type": "Expression" }
+                  }
+                }
+              ],
+              "typeProperties": {
+                "source": {
+                  "type": "SharePointOnlineListSource",
+                  "httpRequestTimeout": "00:05:00"
+                },
+                "sink": {
+                  "type": "ParquetSink",
+                  "storeSettings": { "type": "AzureBlobFSWriteSettings" },
+                  "formatSettings": { "type": "ParquetWriteSettings" }
+                }
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "parameters": {
+      "siteUrl": { "type": "string" },
+      "lists": {
+        "type": "array",
+        "defaultValue": [ { "name": "Documents" }, { "name": "Tasks" } ]
+      }
+    },
+    "annotations": ["data-ai-mcp", "sharepoint"]
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://modelcontextprotocol.io/schemas/draft/mcp.json",
+  "servers": {
+    "data-ai-mcp": {
+      "type": "http",
+      "url": "https://REPLACE_WITH_APP_SERVICE_HOSTNAME/mcp",
+      "headers": {
+        "Authorization": "Bearer ${input:dataAiAccessToken}"
+      },
+      "description": "Data + AI + MCP server hosted on Azure App Service. Provides search_documents, get_document, list_sources, query_structured_data, describe_dataset."
+    }
+  },
+  "inputs": [
+    {
+      "id": "dataAiAccessToken",
+      "type": "promptString",
+      "description": "Entra ID access token for audience api://<app-registration-or-app-id>",
+      "password": true
+    }
+  ]
+}

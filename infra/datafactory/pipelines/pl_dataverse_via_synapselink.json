@@ -1,0 +1,21 @@
+{
+  "name": "pl_dataverse_via_synapselink",
+  "properties": {
+    "description": "Marker pipeline. Dataverse is delivered via Azure Synapse Link for Dataverse, so no ETL runs here. The pipeline only fires a Web call to validate connectivity to the Synapse Link landing path and emits a heartbeat record.",
+    "activities": [
+      {
+        "name": "VerifySynapseLinkPath",
+        "type": "GetMetadata",
+        "typeProperties": {
+          "dataset": {
+            "referenceName": "ds_adls_synapselink_root",
+            "type": "DatasetReference"
+          },
+          "fieldList": ["exists", "lastModified"],
+          "storeSettings": { "type": "AzureBlobFSReadSettings", "recursive": false }
+        }
+      }
+    ],
+    "annotations": ["data-ai-mcp", "dataverse"]
+  }
+}

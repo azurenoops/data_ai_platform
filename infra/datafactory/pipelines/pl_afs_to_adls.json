@@ -1,0 +1,64 @@
+{
+  "name": "pl_afs_to_adls",
+  "properties": {
+    "description": "Copies binaries (and inventory metadata) from an Azure File Share to ADLS Gen2 landing/afs/*.",
+    "activities": [
+      {
+        "name": "CopyAfsBinaries",
+        "type": "Copy",
+        "inputs": [{ "referenceName": "ds_afs_source", "type": "DatasetReference" }],
+        "outputs": [
+          {
+            "referenceName": "ds_adls_binary",
+            "type": "DatasetReference",
+            "parameters": { "container": "landing", "folder": "afs" }
+          }
+        ],
+        "typeProperties": {
+          "source": {
+            "type": "BinarySource",
+            "storeSettings": {
+              "type": "AzureFileStorageReadSettings",
+              "recursive": true
+            }
+          },
+          "sink": {
+            "type": "BinarySink",
+            "storeSettings": { "type": "AzureBlobFSWriteSettings", "copyBehavior": "PreserveHierarchy" }
+          },
+          "enableStaging": false
+        }
+      },
+      {
+        "name": "WriteInventoryParquet",
+        "type": "Copy",
+        "dependsOn": [ { "activity": "CopyAfsBinaries", "dependencyConditions": [ "Succeeded" ] } ],
+        "inputs": [ { "referenceName": "ds_afs_inventory", "type": "DatasetReference" } ],
+        "outputs": [
+          {
+            "referenceName": "ds_adls_parquet",
+            "type": "DatasetReference",
+            "parameters": { "container": "raw", "folder": "afs/inventory" }
+          }
+        ],
+        "typeProperties": {
+          "source": {
+            "type": "DelimitedTextSource",
+            "storeSettings": {
+              "type": "AzureFileStorageReadSettings",
+              "recursive": true
+            },
+            "formatSettings": { "type": "DelimitedTextReadSettings" }
+          },
+          "sink": {
+            "type": "ParquetSink",
+            "storeSettings": { "type": "AzureBlobFSWriteSettings" },
+            "formatSettings": { "type": "ParquetWriteSettings" }
+          }
+        }
+      }
+    ],
+    "annotations": ["data-ai-mcp"]
+  }
+}
+

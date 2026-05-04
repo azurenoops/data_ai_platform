@@ -1,0 +1,73 @@
+{
+  "name": "pl_sql_mi_to_adls",
+  "properties": {
+    "description": "Copies tables from Azure SQL Managed Instance to ADLS Gen2 raw/sqlmi/* as Parquet.",
+    "activities": [
+      {
+        "name": "ForEachTable",
+        "type": "ForEach",
+        "typeProperties": {
+          "items": {
+            "value": "@pipeline().parameters.tables",
+            "type": "Expression"
+          },
+          "isSequential": false,
+          "batchCount": 4,
+          "activities": [
+            {
+              "name": "CopyTable",
+              "type": "Copy",
+              "inputs": [
+                {
+                  "referenceName": "ds_sqlmi_table",
+                  "type": "DatasetReference",
+                  "parameters": {
+                    "schemaName": { "value": "@item().schema", "type": "Expression" },
+                    "tableName": { "value": "@item().name", "type": "Expression" }
+                  }
+                }
+              ],
+              "outputs": [
+                {
+                  "referenceName": "ds_adls_parquet",
+                  "type": "DatasetReference",
+                  "parameters": {
+                    "container": "raw",
+                    "folder": { "value": "@concat('sqlmi/', item().name)", "type": "Expression" }
+                  }
+                }
+              ],
+              "typeProperties": {
+                "source": {
+                  "type": "SqlMISource",
+                  "sqlReaderQuery": {
+                    "value": "SELECT * FROM [@{item().schema}].[@{item().name}]",
+                    "type": "Expression"
+                  },
+                  "partitionOption": "None"
+                },
+                "sink": {
+                  "type": "ParquetSink",
+                  "storeSettings": { "type": "AzureBlobFSWriteSettings" },
+                  "formatSettings": { "type": "ParquetWriteSettings" }
+                },
+                "enableStaging": false,
+                "translator": { "type": "TabularTranslator", "typeConversion": true }
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "parameters": {
+      "tables": {
+        "type": "array",
+        "defaultValue": [
+          { "schema": "dbo", "name": "orders" },
+          { "schema": "dbo", "name": "customers" }
+        ]
+      }
+    },
+    "annotations": ["data-ai-mcp"]
+  }
+}

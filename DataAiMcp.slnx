@@ -1,0 +1,24 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/DataAiMcp.Shared/DataAiMcp.Shared.csproj" />
+    <Project Path="src/DataAiMcp.McpServer/DataAiMcp.McpServer.csproj" />
+    <Project Path="src/DataAiMcp.Ingestion.Functions/DataAiMcp.Ingestion.Functions.csproj" />
+    <Project Path="src/DataAiMcp.Tools.IndexProvisioner/DataAiMcp.Tools.IndexProvisioner.csproj" />
+  </Folder>
+  <Folder Name="/src/Samples/">
+    <Project Path="src/Samples/DataAiMcp.SampleClient.Console/DataAiMcp.SampleClient.Console.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/DataAiMcp.Shared.Tests/DataAiMcp.Shared.Tests.csproj" />
+    <Project Path="tests/DataAiMcp.McpServer.Tests/DataAiMcp.McpServer.Tests.csproj" />
+    <Project Path="tests/DataAiMcp.Functions.Tests/DataAiMcp.Functions.Tests.csproj" />
+    <Project Path="tests/DataAiMcp.Smoke.Tests/DataAiMcp.Smoke.Tests.csproj" />
+  </Folder>
+  <Folder Name="/solution-items/">
+    <File Path="azure.yaml" />
+    <File Path="Directory.Build.props" />
+    <File Path="Directory.Packages.props" />
+    <File Path="global.json" />
+    <File Path="README.md" />
+  </Folder>
+</Solution>
