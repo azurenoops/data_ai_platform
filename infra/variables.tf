@@ -357,3 +357,109 @@ variable "shir_host_cpu_threshold_pct" {
   type        = number
   default     = 90
 }
+
+# ---------------------------------------------------------------------------
+# Re-use existing resources (skip create, reference via data source)
+#
+# Each toggle below flips a root-level module from "create" to "lookup". The
+# module is still composed (so its outputs are stable), but Terraform skips
+# the underlying Azure resource and resolves IDs / endpoints from a data
+# source instead. Use these when the named resource already exists in the
+# target subscription (e.g. shared platform Foundry account, shared Search
+# service) and you want Terraform to wire app config + RBAC against it
+# without taking ownership of the resource lifecycle.
+#
+# When a toggle is true the matching `existing_*_name` and
+# `existing_*_resource_group_name` variables must point at the live resource.
+# Names default to the same `local.names.*` value Terraform would have used
+# when creating from scratch, so a previously-Terraform-created resource can
+# be "adopted" by flipping the toggle without re-naming.
+# ---------------------------------------------------------------------------
+
+# ---- AI Search ----
+variable "use_existing_search" {
+  description = "When true, skip creating the primary AI Search service and reference an existing one. Required when use_existing_search=true: existing_search_name. Optional: existing_search_resource_group_name (defaults to the primary RG)."
+  type        = bool
+  default     = false
+}
+
+variable "existing_search_name" {
+  description = "Name of the existing AI Search service to reference when use_existing_search=true. Defaults to the auto-generated name local.names.search when null."
+  type        = string
+  default     = null
+}
+
+variable "existing_search_resource_group_name" {
+  description = "Resource group name of the existing AI Search service. Defaults to the primary RG (rg-<environment_name>) when null."
+  type        = string
+  default     = null
+}
+
+# ---- AI Foundry (Cognitive Services account + project) ----
+variable "use_existing_foundry_account" {
+  description = "When true, skip creating the primary Foundry account, project, model deployments, and project connections; reference the existing account instead. Model deployments (chat / chat-mini / embedding) and project connections (aisearch, datalake) must already exist on the referenced account."
+  type        = bool
+  default     = false
+}
+
+variable "existing_foundry_account_name" {
+  description = "Name of the existing Foundry (Cognitive Services AIServices) account. Defaults to local.names.foundry_account when null."
+  type        = string
+  default     = null
+}
+
+variable "existing_foundry_account_resource_group_name" {
+  description = "Resource group name of the existing Foundry account. Defaults to the primary RG when null."
+  type        = string
+  default     = null
+}
+
+variable "existing_foundry_project_name" {
+  description = "Project name on the existing Foundry account, used to build the project endpoint URL ('{endpoint}api/projects/{project}'). Defaults to local.names.foundry_project when null."
+  type        = string
+  default     = null
+}
+
+# ---- Data Factory ----
+variable "use_existing_data_factory" {
+  description = "When true, skip creating the Data Factory and reference an existing one. Linked services, datasets, pipelines, triggers, and SHIR resources defined under infra/modules/datafactory/ will NOT be applied to the referenced factory; manage those out-of-band or with a future module refactor. Incompatible with enable_data_factory_pipelines=true, enable_self_hosted_integration_runtime=true, and enable_shir_host_vm=true."
+  type        = bool
+  default     = false
+}
+
+variable "existing_data_factory_name" {
+  description = "Name of the existing Data Factory. Defaults to local.names.data_factory when null."
+  type        = string
+  default     = null
+}
+
+variable "existing_data_factory_resource_group_name" {
+  description = "Resource group name of the existing Data Factory. Defaults to the primary RG when null."
+  type        = string
+  default     = null
+}
+
+# ---- Front Door (DR only) ----
+variable "use_existing_front_door" {
+  description = "When true (and DR is enabled via secondary_location), skip creating the Front Door profile, endpoint, origin group, origins, and route; reference an existing profile + endpoint instead. Routes, origin groups, and origins on the referenced profile must be managed out-of-band. No-op when DR is disabled."
+  type        = bool
+  default     = false
+}
+
+variable "existing_front_door_profile_name" {
+  description = "Name of the existing Front Door (CDN profile, Standard or Premium AzureFrontDoor SKU). Defaults to local.names.front_door when null."
+  type        = string
+  default     = null
+}
+
+variable "existing_front_door_endpoint_name" {
+  description = "Name of the AFD endpoint on the existing profile. Defaults to '{profile_name}-ep' to match the auto-generated naming, when null."
+  type        = string
+  default     = null
+}
+
+variable "existing_front_door_resource_group_name" {
+  description = "Resource group name of the existing Front Door profile. Defaults to the primary RG when null."
+  type        = string
+  default     = null
+}

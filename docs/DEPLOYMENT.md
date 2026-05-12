@@ -132,6 +132,10 @@ These are the parameters and configuration choices you will be asked for. Decide
 | **Multi-region DR** | `secondaryLocation` parameter | empty (off) | Only enable if the second region has the same model availability as the primary. |
 | **Storage replication** | `storageSku` parameter | `Standard_LRS` | Auto-promoted to `Standard_RAGZRS` when DR is enabled. |
 | **Auth audience** | `Auth__Audience` app setting | `api://<siteName>` | Decide whether to keep the auto-generated audience or front with a command-managed app registration exposing a named scope (e.g., `MCP.Read`). |
+| **Reuse existing AI Search** | `use_existing_search` ([infra/variables.tf](../infra/variables.tf)) | `false` | Set `true` only when the Search service already exists in the target RG and Terraform should reference (not create) it. See [§7.4](#74-reuse-existing-resources-skip-create-toggles). |
+| **Reuse existing Foundry account** | `use_existing_foundry_account` | `false` | Set `true` when an upstream platform team already owns the Foundry account. Model deployments and project connections must be managed out-of-band. See [§7.4](#74-reuse-existing-resources-skip-create-toggles). |
+| **Reuse existing Data Factory** | `use_existing_data_factory` | `false` | Set `true` only when ADF pipelines/triggers/SHIR are managed elsewhere. Incompatible with `enable_data_factory_pipelines=true`. See [§7.4](#74-reuse-existing-resources-skip-create-toggles). |
+| **Reuse existing Front Door** | `use_existing_front_door` | `false` | DR-only. Set `true` when an existing AFD profile + endpoint should be reused; origin group + route stay out-of-band. See [§7.4](#74-reuse-existing-resources-skip-create-toggles). |
 | **Pilot SharePoint drive IDs** | `SharePoint__DriveIds` (Function App settings) | empty | Start narrow. Default empty until data owner sign-off is in writing. See [`docs/INGESTION.md`](INGESTION.md) for the full ingestion guide and [`docs/ingestion/sharepoint-files.md`](ingestion/sharepoint-files.md) for the drive-ID lookup procedure. |
 
 Record all decisions in your pre-deploy notes alongside the [Appendix D](#appendix-d--pre-deploy-checklist-signoff) checklist.
@@ -350,6 +354,58 @@ front_door_sku        = "Standard_AzureFrontDoor"
 ```
 
 The complete schema is in [infra/variables.tf](../infra/variables.tf).
+
+### 7.4 Reuse existing resources (skip-create toggles)
+
+Some Azure resources may already exist in the target subscription because they were stood up by a prior deployment, a shared-platform team, or a Bicep run that predates the Terraform migration. The toggles below let Terraform **reference** an existing resource via a `data` source instead of trying to **create** it. RBAC, app settings, alerts, and outputs are still wired against the referenced resource ID, so the rest of the stack continues to work unchanged.
+
+Each toggle defaults to `false` (create from scratch). Flip to `true` only when the matching Azure resource is already present and you want Terraform to leave its lifecycle alone.
+
+| Variable | Default | What it does | Required companion variables |
+| --- | --- | --- | --- |
+| `use_existing_search` | `false` | Skips creating the AI Search service. Reads the existing service via `data.azurerm_search_service.existing` and uses its name + endpoint downstream. | `existing_search_name` (defaults to `local.names.search`), `existing_search_resource_group_name` (defaults to the primary RG). |
+| `use_existing_foundry_account` | `false` | Skips creating the Foundry (Cognitive Services AIServices) account **and** its project, model deployments, and project connections. Reads the existing account via `data.azurerm_cognitive_account.existing_foundry`. | `existing_foundry_account_name`, `existing_foundry_account_resource_group_name`, `existing_foundry_project_name`. |
+| `use_existing_data_factory` | `false` | Skips creating the Data Factory **and every child resource defined inside the module** (linked services, datasets, pipelines, triggers, SHIR). Reads the existing factory via `data.azurerm_data_factory.existing`. | `existing_data_factory_name`, `existing_data_factory_resource_group_name`. Incompatible with `enable_data_factory_pipelines=true`, `enable_self_hosted_integration_runtime=true`, and `enable_shir_host_vm=true` — plan-time precondition will fail. |
+| `use_existing_front_door` | `false` | (DR only — no-op when `secondary_location=""`). Skips creating the Front Door profile, endpoint, origin group, origins, and route. Reads the existing profile + endpoint via `data.azurerm_cdn_frontdoor_profile.existing` / `data.azurerm_cdn_frontdoor_endpoint.existing`. | `existing_front_door_profile_name`, `existing_front_door_endpoint_name` (defaults to `{profile}-ep`), `existing_front_door_resource_group_name`. |
+
+> **All `existing_*_name` variables default to `null` and fall back to the same `local.names.*` value Terraform would have generated for a fresh deploy.** That means a previously-Terraform-created resource can be "adopted" simply by flipping the toggle — no name lookup needed. Override the name explicitly when the existing resource was created with a different name (e.g. shared-platform Foundry account named `cs-foundry-shared`).
+
+#### What changes when you flip a toggle
+
+Flipping a toggle from `false` → `true` on an existing workspace produces a **destroy/import boundary**. Read this carefully before running `terraform apply`:
+
+1. **Terraform will plan a `destroy` for the module's resources.** That is wrong — the resources still exist in Azure, they're just no longer managed. **Do not apply this plan.** Instead:
+   ```bash
+   # For module.search:
+   terraform state list | grep '^module\.search\['
+   # Remove the module and every child resource from state (without touching Azure):
+   terraform state rm 'module.search[0]'
+   # …repeat for module.foundry[0], module.datafactory[0], module.frontdoor[0] as needed.
+   ```
+2. After `terraform state rm`, re-run `terraform plan`. The plan should now show only the new `data` source reads and an in-place re-assignment of role assignments (scope ID resolves to the same Azure resource, so RBAC is re-applied but not lost).
+3. Apply.
+
+Flipping a toggle from `true` → `false` is the inverse: Terraform will try to **create** a resource that already exists in Azure and fail with a 409 Conflict. To switch back to managed:
+1. Set the toggle to `false` and run `terraform plan` to see the create operations.
+2. Import each resource into state with `terraform import module.<name>[0].<resource> <azure-resource-id>` (see provider docs for the exact resource address).
+3. Re-run plan — should show no changes (or only drift on attributes the original creator set differently).
+
+#### Caveats per toggle
+
+- **`use_existing_search`** — If `enable_cmk=true`, the existing Search service must already be configured with `encryptionWithCmk.enforcement = Enabled`. The data source only reads; it cannot enforce CMK on a service that was created without it. The Search service's SystemAssigned identity is required for the CMK Key Vault role assignment — if the existing service was created without it, the CMK key-access role grant is silently skipped (the `compact()` filter in [infra/roles.tf](../infra/roles.tf) drops empty principal IDs). Re-create the service with SystemAssigned identity before flipping `enable_cmk=true`.
+- **`use_existing_foundry_account`** — Model deployments (`chat_deployment`, `chat_mini_deployment`, `embedding_deployment`) and the `aisearch` + `datalake` project connections are **not** re-created on the referenced account. The MCP server and ingestion Function App expect those deployment names to resolve to live deployments — create them out-of-band before deploying app code, or the first chat / embedding call will 404. `existing_foundry_project_name` is used only to build the `Foundry__ProjectEndpoint` URL; it does not need to be a project that Terraform owns.
+- **`use_existing_data_factory`** — Setting this to `true` skips **every** resource inside [infra/modules/datafactory/](../infra/modules/datafactory/): all linked services (`ls_adls`, `ls_kv`, `ls_sqlmi`, `ls_afs`, `ls_sharepoint`), datasets, pipelines (`pl_sql_mi_to_adls`, `pl_afs_to_adls`, `pl_sharepoint_lists_to_adls`, `pl_dataverse_marker`), schedule triggers, and the Self-Hosted Integration Runtime. The platform_ops alerts (failure rate, pipeline outcomes) still bind to the referenced factory ID and will fire on pipelines you create out-of-band. If you need Terraform to manage child resources against an existing factory, that's a deeper refactor of the `datafactory` module (take an `existing_factory_id` input instead of creating `azurerm_data_factory.this`); not in scope for this toggle.
+- **`use_existing_front_door`** — Only takes effect when DR is enabled (`secondary_location != ""`). The origin group, origins (primary + secondary), and route are **not** re-created on the referenced profile. You must manage them out-of-band so the AFD endpoint actually forwards to the App Services. The `FRONT_DOOR_ID` output uses the referenced profile's `resource_guid` for the FDID app-setting binding — if the existing profile is shared across multiple workloads, every workload behind it will see the same FDID header.
+
+#### When NOT to use these toggles
+
+These toggles are an escape hatch for "the resource already exists and I cannot delete it". They are **not** a refactoring shortcut. Prefer the standard create path when:
+
+- You are deploying to a fresh subscription / resource group with no prior state.
+- The resource was created by a previous `terraform apply` from this repository — that's the canonical state and Terraform should keep owning it.
+- You want CMK enforcement, model deployment management, or pipeline definitions to be Terraform-managed (toggles bypass all of these).
+
+Record any reuse decision in your pre-deploy notes alongside the [Appendix D](#appendix-d--pre-deploy-checklist-signoff) checklist, including the owner of the referenced resource and the runbook for managing its lifecycle out-of-band.
 
 ---
 

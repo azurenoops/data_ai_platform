@@ -67,6 +67,7 @@ module "storage" {
 
 module "search" {
   source = "./modules/search"
+  count  = var.use_existing_search ? 0 : 1
 
   resource_group_name = azurerm_resource_group.primary.name
   location            = var.location
@@ -76,8 +77,15 @@ module "search" {
   enforce_cmk         = var.enable_cmk
 }
 
+data "azurerm_search_service" "existing" {
+  count               = var.use_existing_search ? 1 : 0
+  name                = coalesce(var.existing_search_name, local.names.search)
+  resource_group_name = coalesce(var.existing_search_resource_group_name, azurerm_resource_group.primary.name)
+}
+
 module "foundry" {
   source = "./modules/foundry"
+  count  = var.use_existing_foundry_account ? 0 : 1
 
   resource_group_name                  = azurerm_resource_group.primary.name
   location                             = var.location
@@ -87,11 +95,36 @@ module "foundry" {
   chat_deployment                      = var.chat_deployment
   chat_mini_deployment                 = var.chat_mini_deployment
   embedding_deployment                 = var.embedding_deployment
-  search_account_id                    = module.search.search_id
+  search_account_id                    = local.search_id
   storage_account_id                   = module.storage.storage_id
   cmk_key_uri                          = local.cmk_key_uri
   cmk_user_assigned_identity_id        = local.cmk_user_assigned_identity_id
   cmk_user_assigned_identity_client_id = local.cmk_user_assigned_identity_client_id
+}
+
+data "azurerm_cognitive_account" "existing_foundry" {
+  count               = var.use_existing_foundry_account ? 1 : 0
+  name                = coalesce(var.existing_foundry_account_name, local.names.foundry_account)
+  resource_group_name = coalesce(var.existing_foundry_account_resource_group_name, azurerm_resource_group.primary.name)
+}
+
+# ---------------------------------------------------------------------------
+# Indirection locals for resources that can be created OR referenced.
+#
+# Every downstream consumer (RBAC, app settings, alerts, outputs) reads from
+# these locals instead of `module.X.*` directly, so the create-vs-reference
+# decision is invisible to the rest of the composition.
+# ---------------------------------------------------------------------------
+locals {
+  search_id           = var.use_existing_search ? data.azurerm_search_service.existing[0].id : module.search[0].search_id
+  search_name         = var.use_existing_search ? data.azurerm_search_service.existing[0].name : module.search[0].search_name
+  search_endpoint     = var.use_existing_search ? "https://${data.azurerm_search_service.existing[0].name}.search.windows.net" : module.search[0].search_endpoint
+  search_principal_id = var.use_existing_search ? try(data.azurerm_search_service.existing[0].identity[0].principal_id, "") : module.search[0].search_principal_id
+
+  foundry_account_id       = var.use_existing_foundry_account ? data.azurerm_cognitive_account.existing_foundry[0].id : module.foundry[0].account_id
+  foundry_account_endpoint = var.use_existing_foundry_account ? data.azurerm_cognitive_account.existing_foundry[0].endpoint : module.foundry[0].account_endpoint
+  foundry_project_name     = var.use_existing_foundry_account ? coalesce(var.existing_foundry_project_name, local.names.foundry_project) : module.foundry[0].project_name
+  foundry_project_endpoint = var.use_existing_foundry_account ? "${data.azurerm_cognitive_account.existing_foundry[0].endpoint}api/projects/${local.foundry_project_name}" : module.foundry[0].project_endpoint
 }
 
 module "document_intelligence" {
@@ -121,10 +154,10 @@ module "appservice" {
   app_settings = {
     AZURE_CLIENT_ID                = module.identity.mcp_server_identity_client_id
     AZURE_TENANT_ID                = data.azurerm_client_config.current.tenant_id
-    Search__Endpoint               = module.search.search_endpoint
+    Search__Endpoint               = local.search_endpoint
     Search__IndexName              = "documents"
-    Foundry__Endpoint              = module.foundry.account_endpoint
-    Foundry__ProjectEndpoint       = module.foundry.project_endpoint
+    Foundry__Endpoint              = local.foundry_account_endpoint
+    Foundry__ProjectEndpoint       = local.foundry_project_endpoint
     Foundry__ChatDeployment        = var.chat_deployment
     Foundry__EmbeddingDeployment   = var.embedding_deployment
     Storage__AccountName           = module.storage.storage_account_name
@@ -159,9 +192,9 @@ module "functions" {
     Storage__RawContainer          = "raw"
     Storage__CuratedContainer      = "curated"
     Storage__ChunksContainer       = "chunks"
-    Search__Endpoint               = module.search.search_endpoint
+    Search__Endpoint               = local.search_endpoint
     Search__IndexName              = "documents"
-    Foundry__Endpoint              = module.foundry.account_endpoint
+    Foundry__Endpoint              = local.foundry_account_endpoint
     Foundry__EmbeddingDeployment   = var.embedding_deployment
     DocumentIntelligence__Endpoint = module.document_intelligence.endpoint
     Graph__TenantId                = data.azurerm_client_config.current.tenant_id
@@ -174,6 +207,7 @@ module "functions" {
 
 module "datafactory" {
   source = "./modules/datafactory"
+  count  = var.use_existing_data_factory ? 0 : 1
 
   resource_group_name       = azurerm_resource_group.primary.name
   location                  = var.location
@@ -226,6 +260,17 @@ module "datafactory" {
   sharepoint_use_shir                    = var.sharepoint_use_shir
 }
 
+data "azurerm_data_factory" "existing" {
+  count               = var.use_existing_data_factory ? 1 : 0
+  name                = coalesce(var.existing_data_factory_name, local.names.data_factory)
+  resource_group_name = coalesce(var.existing_data_factory_resource_group_name, azurerm_resource_group.primary.name)
+}
+
+locals {
+  data_factory_id   = var.use_existing_data_factory ? data.azurerm_data_factory.existing[0].id : module.datafactory[0].factory_id
+  data_factory_name = var.use_existing_data_factory ? data.azurerm_data_factory.existing[0].name : module.datafactory[0].factory_name
+}
+
 module "synapse" {
   source = "./modules/synapse"
 
@@ -269,7 +314,7 @@ module "shirhost" {
   storage_account_name = module.storage.storage_account_name
   storage_account_id   = module.storage.storage_id
 
-  shir_authorization_key = module.datafactory.self_hosted_integration_runtime_primary_key
+  shir_authorization_key = module.datafactory[0].self_hosted_integration_runtime_primary_key
   shir_installer_url     = var.shir_installer_url
   shir_install_method    = var.shir_install_method
   dsc_zip_path           = "${path.module}/modules/shirhost/dsc/InstallShir.zip"
@@ -287,6 +332,30 @@ resource "null_resource" "shir_host_preconditions" {
     precondition {
       condition     = var.shir_host_subnet_id != null
       error_message = "enable_shir_host_vm requires shir_host_subnet_id to be set to an existing subnet ID."
+    }
+    precondition {
+      condition     = !var.use_existing_data_factory
+      error_message = "enable_shir_host_vm is incompatible with use_existing_data_factory=true. The SHIR auth key is sourced from the Terraform-managed Data Factory's SHIR resource; bring your own SHIR registration when reusing an existing factory."
+    }
+  }
+}
+
+# ---------------------------------------------------------------------------
+# Plan-time guards for the reuse-existing-resource toggles.
+#
+# Each precondition surfaces a contradiction (e.g. reusing the Data Factory
+# while also asking Terraform to deploy pipelines onto it) before apply,
+# rather than producing a confusing runtime error.
+# ---------------------------------------------------------------------------
+resource "null_resource" "reuse_existing_preconditions" {
+  lifecycle {
+    precondition {
+      condition     = !(var.use_existing_data_factory && var.enable_data_factory_pipelines)
+      error_message = "use_existing_data_factory=true is incompatible with enable_data_factory_pipelines=true. Pipeline / linked-service / trigger creation lives inside the datafactory module, which is skipped when the factory is reused. Manage pipelines on the referenced factory out-of-band."
+    }
+    precondition {
+      condition     = !(var.use_existing_data_factory && var.enable_self_hosted_integration_runtime)
+      error_message = "use_existing_data_factory=true is incompatible with enable_self_hosted_integration_runtime=true. SHIR provisioning lives inside the datafactory module; register the SHIR on the referenced factory out-of-band."
     }
   }
 }
@@ -329,7 +398,7 @@ module "alerts" {
   tracked_secrets = local.tracked_secrets
 
   function_app_id    = module.functions.function_app_id
-  data_factory_id    = module.datafactory.factory_id
-  foundry_account_id = module.foundry.account_id
+  data_factory_id    = local.data_factory_id
+  foundry_account_id = local.foundry_account_id
   shir_host_vm_id    = var.enable_shir_host_vm ? module.shirhost[0].vm_id : null
 }

@@ -23,7 +23,7 @@ output "STORAGE_DFS_ENDPOINT" {
 }
 
 output "SEARCH_ENDPOINT" {
-  value = module.search.search_endpoint
+  value = local.search_endpoint
 }
 
 output "SEARCH_INDEX_NAME" {
@@ -31,15 +31,15 @@ output "SEARCH_INDEX_NAME" {
 }
 
 output "SEARCH_NAME" {
-  value = module.search.search_name
+  value = local.search_name
 }
 
 output "FOUNDRY_ACCOUNT_ENDPOINT" {
-  value = module.foundry.account_endpoint
+  value = local.foundry_account_endpoint
 }
 
 output "FOUNDRY_PROJECT_ENDPOINT" {
-  value = module.foundry.project_endpoint
+  value = local.foundry_project_endpoint
 }
 
 output "FOUNDRY_CHAT_DEPLOYMENT" {
@@ -72,7 +72,7 @@ output "APP_SERVICE_HOSTNAME" {
 
 # When DR is enabled the public URL is the Front Door endpoint (priority 1 = primary, 2 = secondary).
 output "MCP_SERVER_BASE_URL" {
-  value = local.enable_dr ? module.frontdoor[0].endpoint_url : "https://${module.appservice.default_host_name}"
+  value = local.enable_dr ? local.front_door_endpoint_url : "https://${module.appservice.default_host_name}"
 }
 
 output "MCP_PRIMARY_HOSTNAME" {
@@ -84,36 +84,36 @@ output "MCP_SECONDARY_HOSTNAME" {
 }
 
 output "FRONT_DOOR_ENDPOINT" {
-  value = local.enable_dr ? module.frontdoor[0].endpoint_url : ""
+  value = local.front_door_endpoint_url
 }
 
 output "FRONT_DOOR_ID" {
-  value = local.enable_dr ? module.frontdoor[0].front_door_id_header : ""
+  value = local.front_door_id_header
 }
 
 output "FUNCTION_APP_NAME" {
   value = module.functions.function_app_name
 }
 
-# ---- Data Factory inventory (empty when ADF pipelines are disabled) ----
+# ---- Data Factory inventory (empty when ADF pipelines are disabled or factory is reused) ----
 output "DATA_FACTORY_NAME" {
-  value = module.datafactory.factory_name
+  value = local.data_factory_name
 }
 
 output "DATA_FACTORY_PIPELINE_NAMES" {
-  value = module.datafactory.pipeline_names
+  value = var.use_existing_data_factory ? [] : module.datafactory[0].pipeline_names
 }
 
 output "DATA_FACTORY_LINKED_SERVICE_NAMES" {
-  value = module.datafactory.linked_service_names
+  value = var.use_existing_data_factory ? [] : module.datafactory[0].linked_service_names
 }
 
 output "DATA_FACTORY_TRIGGER_NAMES" {
-  value = module.datafactory.trigger_names
+  value = var.use_existing_data_factory ? [] : module.datafactory[0].trigger_names
 }
 
 output "SHIR_NAME" {
-  value = module.datafactory.self_hosted_integration_runtime_name
+  value = var.use_existing_data_factory ? "" : module.datafactory[0].self_hosted_integration_runtime_name
 }
 
 # ---- SHIR host VM (empty when not deployed) ----
