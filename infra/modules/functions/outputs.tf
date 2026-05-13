@@ -1,11 +1,11 @@
 output "function_app_id" {
-  value = azapi_resource.function_app.id
+  value = azurerm_linux_function_app.this.id
 }
 
 output "function_app_name" {
-  value = azapi_resource.function_app.name
+  value = azurerm_linux_function_app.this.name
 }
 
 output "default_host_name" {
-  value = azapi_resource.function_app.output.properties.defaultHostName
+  value = azurerm_linux_function_app.this.default_hostname
 }

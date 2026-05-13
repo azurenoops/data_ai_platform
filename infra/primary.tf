@@ -8,6 +8,65 @@ module "monitoring" {
   app_insights_name   = local.names.app_insights
 }
 
+# ---------------------------------------------------------------------------
+# Networking
+#
+# Single regional VNet with three subnets:
+#   snet-app        - App Service VNet integration (delegated to serverFarms)
+#   snet-functions  - Function App VNet integration (delegated to serverFarms)
+#   snet-pe         - Private endpoint NICs
+#
+# Plus private DNS zones for every service we PE (Search, Cognitive Services,
+# and reserved zones for Storage/KV/Sites for follow-up phases). DNS zone
+# names default to Azure US Government - override via var.private_dns_zone_names
+# if retargeting to commercial Azure.
+#
+# In hub-and-spoke topologies the platform team usually owns the VNet and
+# central private DNS. Set use_existing_vnet=true and supply the subnet IDs
+# (existing_subnet_*_id) + a map of pre-existing private DNS zone IDs
+# (existing_private_dns_zone_ids) to bypass this module entirely.
+# ---------------------------------------------------------------------------
+module "network" {
+  source = "./modules/network"
+  count  = var.use_existing_vnet ? 0 : 1
+
+  resource_group_name             = azurerm_resource_group.primary.name
+  location                        = var.location
+  tags                            = local.tags
+  vnet_name                       = local.names.vnet
+  vnet_address_space              = var.vnet_address_space
+  subnet_app_address_prefix       = var.subnet_app_address_prefix
+  subnet_functions_address_prefix = var.subnet_functions_address_prefix
+  subnet_pe_address_prefix        = var.subnet_pe_address_prefix
+}
+
+# Plan-time validator: when use_existing_vnet=true, every existing_* input
+# must be supplied. terraform_data + lifecycle.precondition gives a clear
+# error message instead of a downstream "value cannot be null" failure.
+resource "terraform_data" "validate_existing_vnet_inputs" {
+  lifecycle {
+    precondition {
+      condition = !var.use_existing_vnet || (
+        var.existing_subnet_app_id != null &&
+        var.existing_subnet_functions_id != null &&
+        var.existing_subnet_pe_id != null &&
+        contains(keys(var.existing_private_dns_zone_ids), "search") &&
+        contains(keys(var.existing_private_dns_zone_ids), "cognitiveservices")
+      )
+      error_message = "use_existing_vnet=true requires non-null existing_subnet_app_id, existing_subnet_functions_id, existing_subnet_pe_id, and existing_private_dns_zone_ids must contain at least the 'search' and 'cognitiveservices' keys."
+    }
+  }
+}
+
+# Indirection so downstream PEs and module wiring don't care whether the
+# VNet/DNS were created here or supplied by a platform team.
+locals {
+  subnet_app_id        = var.use_existing_vnet ? var.existing_subnet_app_id : module.network[0].subnet_app_id
+  subnet_functions_id  = var.use_existing_vnet ? var.existing_subnet_functions_id : module.network[0].subnet_functions_id
+  subnet_pe_id         = var.use_existing_vnet ? var.existing_subnet_pe_id : module.network[0].subnet_pe_id
+  private_dns_zone_ids = var.use_existing_vnet ? var.existing_private_dns_zone_ids : module.network[0].private_dns_zone_ids
+}
+
 module "identity" {
   source = "./modules/identity"
 
@@ -139,6 +198,83 @@ module "document_intelligence" {
   cmk_user_assigned_identity_client_id = local.cmk_user_assigned_identity_client_id
 }
 
+# ---------------------------------------------------------------------------
+# Private endpoints
+#
+# AI Search, Document Intelligence, and Foundry all run with public network
+# access disabled (Navy NIST 800-53 policy "Azure AI Services resources
+# should restrict network access"). Bring them onto the VNet via private
+# endpoints so the App Service + Function App (also VNet-integrated) can
+# reach them.
+#
+# When use_existing_X = true the resource lives outside this composition
+# and has its own networking - skip creating a PE in our VNet.
+# ---------------------------------------------------------------------------
+
+resource "azurerm_private_endpoint" "search" {
+  count = var.use_existing_search ? 0 : 1
+
+  name                = "pep-${local.names.search}"
+  resource_group_name = azurerm_resource_group.primary.name
+  location            = var.location
+  subnet_id           = local.subnet_pe_id
+  tags                = local.tags
+
+  private_service_connection {
+    name                           = "search"
+    private_connection_resource_id = local.search_id
+    is_manual_connection           = false
+    subresource_names              = ["searchService"]
+  }
+
+  private_dns_zone_group {
+    name                 = "search"
+    private_dns_zone_ids = [local.private_dns_zone_ids["search"]]
+  }
+}
+
+resource "azurerm_private_endpoint" "document_intelligence" {
+  name                = "pep-${local.names.document_intelligence}"
+  resource_group_name = azurerm_resource_group.primary.name
+  location            = var.location
+  subnet_id           = local.subnet_pe_id
+  tags                = local.tags
+
+  private_service_connection {
+    name                           = "documentintelligence"
+    private_connection_resource_id = module.document_intelligence.account_id
+    is_manual_connection           = false
+    subresource_names              = ["account"]
+  }
+
+  private_dns_zone_group {
+    name                 = "cognitiveservices"
+    private_dns_zone_ids = [local.private_dns_zone_ids["cognitiveservices"]]
+  }
+}
+
+resource "azurerm_private_endpoint" "foundry" {
+  count = var.use_existing_foundry_account ? 0 : 1
+
+  name                = "pep-${local.names.foundry_account}"
+  resource_group_name = azurerm_resource_group.primary.name
+  location            = var.location
+  subnet_id           = local.subnet_pe_id
+  tags                = local.tags
+
+  private_service_connection {
+    name                           = "foundry"
+    private_connection_resource_id = local.foundry_account_id
+    is_manual_connection           = false
+    subresource_names              = ["account"]
+  }
+
+  private_dns_zone_group {
+    name                 = "cognitiveservices"
+    private_dns_zone_ids = [local.private_dns_zone_ids["cognitiveservices"]]
+  }
+}
+
 module "appservice" {
   source = "./modules/appservice"
 
@@ -151,6 +287,7 @@ module "appservice" {
   user_assigned_identity_id        = module.identity.mcp_server_identity_id
   user_assigned_identity_client_id = module.identity.mcp_server_identity_client_id
   app_insights_connection_string   = module.monitoring.app_insights_connection_string
+  virtual_network_subnet_id        = local.subnet_app_id
   app_settings = {
     AZURE_CLIENT_ID                = module.identity.mcp_server_identity_client_id
     AZURE_TENANT_ID                = data.azurerm_client_config.current.tenant_id
@@ -180,11 +317,10 @@ module "functions" {
   plan_name                        = local.names.function_plan
   function_app_name                = local.names.function_app
   storage_account_name             = module.storage.storage_account_name
-  storage_dfs_endpoint             = module.storage.dfs_endpoint
-  deployment_container_name        = "deploy"
   user_assigned_identity_id        = module.identity.ingestion_identity_id
   user_assigned_identity_client_id = module.identity.ingestion_identity_client_id
   app_insights_connection_string   = module.monitoring.app_insights_connection_string
+  virtual_network_subnet_id        = local.subnet_functions_id
   app_settings = {
     AZURE_CLIENT_ID                = module.identity.ingestion_identity_client_id
     Storage__AccountName           = module.storage.storage_account_name
@@ -280,7 +416,7 @@ module "synapse" {
   workspace_name                = local.names.synapse_workspace
   storage_account_id            = module.storage.storage_id
   storage_filesystem_id         = module.storage.filesystem_ids["curated"]
-  sql_admin_login               = "syn_admin"
+  sql_admin_login               = "synadmin"
   sql_admin_aad_object_id       = var.principal_id
   tenant_id                     = data.azurerm_client_config.current.tenant_id
   cmk_key_uri                   = local.cmk_key_uri

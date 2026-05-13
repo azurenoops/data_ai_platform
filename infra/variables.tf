@@ -309,6 +309,75 @@ variable "shir_install_method" {
 }
 
 # ---------------------------------------------------------------------------
+# Networking (VNet + private endpoints)
+#
+# These drive the network module that owns the VNet, three subnets
+# (app / functions / pe), and the private DNS zones used by every PE in
+# primary.tf. Defaults use a 10.42.0.0/16 space that is unlikely to overlap
+# with hub/spoke networks; override in envs/*.tfvars if you have a tenant-
+# assigned CIDR.
+#
+# For hub-and-spoke topologies where networking is pre-provisioned by a
+# platform team, set use_existing_vnet=true and pass the subnet + DNS zone
+# IDs through the existing_* variables. The network module is then skipped
+# entirely and the PEs land in the supplied subnet.
+# ---------------------------------------------------------------------------
+
+variable "vnet_address_space" {
+  description = "Address space (CIDR list) for the platform VNet. Ignored when use_existing_vnet=true."
+  type        = list(string)
+  default     = ["10.42.0.0/16"]
+}
+
+variable "subnet_app_address_prefix" {
+  description = "CIDR for the App Service VNet-integration subnet (delegated to Microsoft.Web/serverFarms). Ignored when use_existing_vnet=true."
+  type        = string
+  default     = "10.42.1.0/24"
+}
+
+variable "subnet_functions_address_prefix" {
+  description = "CIDR for the Function App VNet-integration subnet (delegated to Microsoft.Web/serverFarms). Ignored when use_existing_vnet=true."
+  type        = string
+  default     = "10.42.2.0/24"
+}
+
+variable "subnet_pe_address_prefix" {
+  description = "CIDR for the private-endpoint subnet (NIC IPs land here). Ignored when use_existing_vnet=true."
+  type        = string
+  default     = "10.42.3.0/24"
+}
+
+variable "use_existing_vnet" {
+  description = "When true, skip creating the VNet, subnets, and private DNS zones. Consume external IDs via the existing_* variables below. Use this in hub-and-spoke topologies where networking is pre-provisioned by a platform team."
+  type        = bool
+  default     = false
+}
+
+variable "existing_subnet_app_id" {
+  description = "Resource ID of an existing subnet for App Service VNet integration. Required when use_existing_vnet=true. MUST be delegated to Microsoft.Web/serverFarms."
+  type        = string
+  default     = null
+}
+
+variable "existing_subnet_functions_id" {
+  description = "Resource ID of an existing subnet for Function App VNet integration. Required when use_existing_vnet=true. MUST be delegated to Microsoft.Web/serverFarms."
+  type        = string
+  default     = null
+}
+
+variable "existing_subnet_pe_id" {
+  description = "Resource ID of an existing subnet that will host private-endpoint NICs. Required when use_existing_vnet=true. private_endpoint_network_policies SHOULD be Disabled."
+  type        = string
+  default     = null
+}
+
+variable "existing_private_dns_zone_ids" {
+  description = "Map of pre-existing private DNS zone IDs keyed by service token. Required when use_existing_vnet=true. Required keys: 'search' and 'cognitiveservices'. Optional reserved keys for future PE phases: 'blob', 'dfs', 'vault', 'sites'."
+  type        = map(string)
+  default     = {}
+}
+
+# ---------------------------------------------------------------------------
 # Alerting (opt-in)
 #
 # An empty alert_email_recipients list disables every alert resource. Set the

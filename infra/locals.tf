@@ -37,11 +37,12 @@ locals {
     document_intelligence = "${local.abbrs.cognitiveServicesAccounts}-di-${local.resource_token}"
     app_service_plan      = "${local.abbrs.appServicePlans}-${local.resource_token}"
     app_service           = "${local.abbrs.sites}-mcp-${local.resource_token}"
-    function_plan         = "${local.abbrs.appServicePlans}-flex-${local.resource_token}"
+    function_plan         = "${local.abbrs.appServicePlans}-ep1-${local.resource_token}"
     function_app          = "${local.abbrs.functionApps}-ing-${local.resource_token}"
     data_factory          = "${local.abbrs.dataFactories}-${local.resource_token}"
     synapse_workspace     = "${local.abbrs.synapseWorkspaces}-${local.resource_token}"
     front_door            = "fd-${local.resource_token}"
+    vnet                  = "${local.abbrs.virtualNetworks}-${local.resource_token}"
   }
 
   app_audience = "api://${local.abbrs.sites}-mcp-${local.resource_token}"

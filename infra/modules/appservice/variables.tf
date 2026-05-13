@@ -42,3 +42,9 @@ variable "app_settings" {
   type        = map(string)
   default     = {}
 }
+
+variable "virtual_network_subnet_id" {
+  description = "Optional subnet ID for VNet integration. When set, the app routes outbound traffic through the VNet so it can reach private-endpoint-only resources (AI Search, Document Intelligence, Foundry)."
+  type        = string
+  default     = null
+}

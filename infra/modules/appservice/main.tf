@@ -25,6 +25,8 @@ resource "azurerm_linux_web_app" "this" {
   tags                = var.tags
   service_plan_id     = azurerm_service_plan.this.id
 
+  virtual_network_subnet_id = var.virtual_network_subnet_id
+
   https_only                      = true
   key_vault_reference_identity_id = var.user_assigned_identity_id
 

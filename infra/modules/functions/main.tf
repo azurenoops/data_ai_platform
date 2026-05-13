@@ -1,8 +1,8 @@
-data "azurerm_resource_group" "this" {
-  name = var.resource_group_name
-}
-
 locals {
+  # AzureWebJobsStorage settings that pin the Functions host's storage auth
+  # to the user-assigned managed identity. Shared key is disabled on the
+  # platform's storage account, so connection-string auth is not an option.
+  # See: https://learn.microsoft.com/azure/azure-functions/functions-reference#configure-an-identity-based-connection
   base_app_settings = {
     APPLICATIONINSIGHTS_CONNECTION_STRING = var.app_insights_connection_string
     AzureWebJobsStorage__accountName      = var.storage_account_name
@@ -11,15 +11,20 @@ locals {
   }
 
   merged_app_settings = merge(local.base_app_settings, var.app_settings)
-
-  # Translate the dfs endpoint (https://acct.dfs.core.windows.net/) into the matching blob endpoint
-  # (https://acct.blob.core.windows.net/) - the FlexConsumption deployment storage URL must point
-  # at the blob endpoint, not dfs, even on HNS-enabled accounts.
-  blob_root = replace(var.storage_dfs_endpoint, ".dfs.", ".blob.")
-
-  app_settings_array = [for k, v in local.merged_app_settings : { name = k, value = v }]
 }
 
+# Elastic Premium (EP1) — drop-in replacement for FlexConsumption (FC1) on
+# Gov tenants where Microsoft.Web/FlexConsumption is not enabled on the
+# subscription. EP1 supports:
+#   - VNet integration (required since AI Search + Document Intelligence
+#     run with publicNetworkAccess = "disabled")
+#   - User-assigned managed identity for storage auth
+#   - Always-warm workers (no cold starts)
+#   - 60-min execution timeout
+# Cost note: EP1 is always-allocated (~$165/mo idle, commercial pricing,
+# Gov typically +5-15%) versus FC1's pay-per-execution model. If FC1
+# becomes available on the subscription, swap sku_name back and restore
+# the azapi_resource + functionAppConfig block from git history.
 resource "azurerm_service_plan" "this" {
   name                = var.plan_name
   resource_group_name = var.resource_group_name
@@ -27,58 +32,50 @@ resource "azurerm_service_plan" "this" {
   tags                = var.tags
 
   os_type  = "Linux"
-  sku_name = "FC1"
+  sku_name = "EP1"
 }
 
-# FlexConsumption + managed-identity-based deployment storage isn't fully exposed by the azurerm
-# `azurerm_linux_function_app` resource yet. Use azapi to mirror the Bicep functionAppConfig block.
-resource "azapi_resource" "function_app" {
-  type      = "Microsoft.Web/sites@2024-04-01"
-  name      = var.function_app_name
-  parent_id = data.azurerm_resource_group.this.id
-  location  = var.location
-  tags      = var.tags
+resource "azurerm_linux_function_app" "this" {
+  name                = var.function_app_name
+  resource_group_name = var.resource_group_name
+  location            = var.location
+  tags                = var.tags
 
-  body = {
-    kind = "functionapp,linux"
-    identity = {
-      type = "UserAssigned"
-      userAssignedIdentities = {
-        (var.user_assigned_identity_id) = {}
-      }
-    }
-    properties = {
-      serverFarmId              = azurerm_service_plan.this.id
-      httpsOnly                 = true
-      keyVaultReferenceIdentity = var.user_assigned_identity_id
-      functionAppConfig = {
-        deployment = {
-          storage = {
-            type  = "blobContainer"
-            value = "${local.blob_root}${var.deployment_container_name}"
-            authentication = {
-              type                           = "UserAssignedIdentity"
-              userAssignedIdentityResourceId = var.user_assigned_identity_id
-            }
-          }
-        }
-        runtime = {
-          name    = "dotnet-isolated"
-          version = "9.0"
-        }
-        scaleAndConcurrency = {
-          instanceMemoryMB     = 2048
-          maximumInstanceCount = 100
-        }
-      }
-      siteConfig = {
-        ftpsState     = "Disabled"
-        minTlsVersion = "1.2"
-        http20Enabled = true
-        appSettings   = local.app_settings_array
-      }
+  service_plan_id = azurerm_service_plan.this.id
+
+  virtual_network_subnet_id = var.virtual_network_subnet_id
+
+  storage_account_name          = var.storage_account_name
+  storage_uses_managed_identity = true
+
+  https_only                      = true
+  key_vault_reference_identity_id = var.user_assigned_identity_id
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [var.user_assigned_identity_id]
+  }
+
+  site_config {
+    ftps_state          = "Disabled"
+    minimum_tls_version = "1.2"
+    http2_enabled       = true
+
+    application_stack {
+      dotnet_version              = "9.0"
+      use_dotnet_isolated_runtime = true
     }
   }
 
-  response_export_values = ["properties.defaultHostName"]
+  app_settings = local.merged_app_settings
+
+  lifecycle {
+    # The Functions deploy step in CI (`az functionapp deployment source
+    # config-zip`) updates WEBSITE_RUN_FROM_PACKAGE on every deploy.
+    # Ignoring it here prevents Terraform from fighting CI on subsequent
+    # plans.
+    ignore_changes = [
+      app_settings["WEBSITE_RUN_FROM_PACKAGE"],
+    ]
+  }
 }

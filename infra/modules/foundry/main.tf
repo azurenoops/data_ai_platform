@@ -1,6 +1,9 @@
-data "azurerm_resource_group" "this" {
-  name = var.resource_group_name
-}
+# The resource group is created in the root composition (azurerm_resource_group.primary)
+# in the same apply. Looking it up with `data "azurerm_resource_group" "this"` would race
+# the RG creation and fail on the first apply ("Resource Group ... was not found"). The
+# RG resource ID format is stable, so we derive it from the current subscription scope
+# instead of a data lookup.
+data "azurerm_subscription" "current" {}
 
 data "azurerm_storage_account" "datalake" {
   name                = element(split("/", var.storage_account_id), length(split("/", var.storage_account_id)) - 1)
@@ -8,6 +11,8 @@ data "azurerm_storage_account" "datalake" {
 }
 
 locals {
+  resource_group_id = "${data.azurerm_subscription.current.id}/resourceGroups/${var.resource_group_name}"
+
   cmk_enabled   = var.cmk_key_uri != "" && var.cmk_user_assigned_identity_id != ""
   cmk_key_name  = local.cmk_enabled ? element(split("/", var.cmk_key_uri), length(split("/", var.cmk_key_uri)) - 1) : ""
   cmk_vault_uri = local.cmk_enabled ? "${trimsuffix(var.cmk_key_uri, "/keys/${local.cmk_key_name}")}/" : ""
@@ -37,11 +42,15 @@ locals {
   account_properties = merge(
     {
       customSubDomainName    = var.account_name
-      publicNetworkAccess    = "Enabled"
+      publicNetworkAccess    = "Disabled"
       disableLocalAuth       = true
       allowProjectManagement = true
+      # When publicNetworkAccess = "Disabled", networkAcls is effectively
+      # ignored — data-plane traffic only flows through the private endpoint
+      # created in primary.tf. Kept here so the body shape is stable if the
+      # access mode is ever flipped back to "Enabled" for break-glass.
       networkAcls = {
-        defaultAction       = "Allow"
+        defaultAction       = "Deny"
         virtualNetworkRules = []
         ipRules             = []
       }
@@ -53,7 +62,7 @@ locals {
 resource "azapi_resource" "account" {
   type      = "Microsoft.CognitiveServices/accounts@2025-04-01-preview"
   name      = var.account_name
-  parent_id = data.azurerm_resource_group.this.id
+  parent_id = local.resource_group_id
   location  = var.location
   tags      = var.tags
 
