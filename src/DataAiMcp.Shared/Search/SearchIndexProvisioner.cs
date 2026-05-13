@@ -30,10 +30,11 @@ public sealed class SearchIndexProvisioner
         if (!string.IsNullOrWhiteSpace(_options.CmkKeyVaultUri) && !string.IsNullOrWhiteSpace(_options.CmkKeyName))
         {
             // Per-index CMK. AAD identity is null => Search service uses its system-assigned identity to wrap/unwrap.
+            // Azure.Search.Documents 11.6.0 SearchResourceEncryptionKey(Uri, string, string) ctor takes Uri (not string).
             cmk = new SearchResourceEncryptionKey(
                 keyName: _options.CmkKeyName,
                 keyVersion: _options.CmkKeyVersion ?? string.Empty,
-                vaultUri: new Uri(_options.CmkKeyVaultUri).ToString());
+                vaultUri: new Uri(_options.CmkKeyVaultUri));
             _logger.LogInformation(
                 "CMK enabled for Search index using key '{Key}' in vault '{Vault}'.",
                 _options.CmkKeyName, _options.CmkKeyVaultUri);

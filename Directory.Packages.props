@@ -20,13 +20,15 @@
 
   <ItemGroup Label="Microsoft.Extensions.AI">
     <!--
-      Abstractions bumped to 9.7.1 (stable) because ModelContextProtocol.Core 0.3.0-preview.3
-      transitively requires Microsoft.Extensions.AI.Abstractions >= 9.7.1. The 9.1.0-preview
-      builds of Microsoft.Extensions.AI and .AI.OpenAI use a floor pin (>=) on Abstractions,
-      so the higher Abstractions version still satisfies them without forcing a 10.x jump.
+      Coherent 9.7.1 family. ModelContextProtocol.Core 0.3.0-preview.3 requires
+      Microsoft.Extensions.AI.Abstractions >= 9.7.1, and the source uses the post-rename
+      `AsIChatClient` / `AsIEmbeddingGenerator` extensions which only exist in AI.OpenAI
+      9.4.0-preview and later. Microsoft.Extensions.AI / .Abstractions are GA at 9.7.1;
+      the OpenAI integration package stayed in preview at 9.7.1-preview.1.25365.4 (the
+      paired build for Abstractions 9.7.1). All three move together to avoid version skew.
     -->
-    <PackageVersion Include="Microsoft.Extensions.AI" Version="9.1.0-preview.1.25064.3" />
-    <PackageVersion Include="Microsoft.Extensions.AI.OpenAI" Version="9.1.0-preview.1.25064.3" />
+    <PackageVersion Include="Microsoft.Extensions.AI" Version="9.7.1" />
+    <PackageVersion Include="Microsoft.Extensions.AI.OpenAI" Version="9.7.1-preview.1.25365.4" />
     <PackageVersion Include="Microsoft.Extensions.AI.Abstractions" Version="9.7.1" />
   </ItemGroup>
 
@@ -58,6 +60,8 @@
     <PackageVersion Include="Microsoft.Extensions.Logging" Version="9.0.5" />
     <PackageVersion Include="Microsoft.Extensions.Options" Version="9.0.5" />
     <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="9.0.5" />
+    <!-- ValidateDataAnnotations() lives in its own package (not transitively included by Options). -->
+    <PackageVersion Include="Microsoft.Extensions.Options.DataAnnotations" Version="9.0.5" />
   </ItemGroup>
 
   <ItemGroup Label="Azure Functions">
@@ -101,8 +105,12 @@
   </ItemGroup>
 
   <ItemGroup Label="Misc">
-    <!-- System.Text.Json bumped to 9.0.5 (>= 9.0.1 required by Microsoft.Extensions.AI 9.1.0-preview). -->
-    <PackageVersion Include="System.Text.Json" Version="9.0.5" />
+    <!--
+      System.Text.Json 9.0.7 is the minimum required by Microsoft.Extensions.AI 9.7.1
+      (transitive constraint System.Text.Json >= 9.0.7). 9.0.7 is the matching servicing
+      release for the .NET 9 runtime line.
+    -->
+    <PackageVersion Include="System.Text.Json" Version="9.0.7" />
     <PackageVersion Include="Polly" Version="8.5.0" />
     <PackageVersion Include="Microsoft.SourceLink.GitHub" Version="8.0.0" />
   </ItemGroup>

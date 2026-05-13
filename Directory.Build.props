@@ -7,7 +7,22 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
-    <NoWarn>$(NoWarn);CA1014;CA1515;CA1812;CA2007;CA1848;NU1903</NoWarn>
+    <!--
+      Suppressions (justified):
+        CA1014  CLS-compliant assembly attribute — internal-only assemblies, never published.
+        CA1515  Internal types preferred — design choice for shared/cross-asm types.
+        CA1812  Avoid uninstantiated internal classes — DI registers many at runtime.
+        CA2007  ConfigureAwait — set globally; app code is single-context, runs in .NET Generic Host.
+        CA1848  Use LoggerMessage delegates — pre-existing logging patterns; tracked as follow-up.
+        CA1716  Identifiers should not match keywords (VB.NET) — `Shared` is a deliberate
+                project naming convention; codebase is C#-only and renaming 8 namespaces
+                + all consumers has zero functional benefit.
+        CA1707  Identifiers should not contain underscores — xUnit convention
+                `Subject_behavior_expected` test naming is used throughout the test
+                projects (intentional and standard practice).
+        NU1903  Vulnerability advisories — handled via explicit version pins above.
+    -->
+    <NoWarn>$(NoWarn);CA1014;CA1515;CA1812;CA2007;CA1848;CA1716;CA1707;NU1903</NoWarn>
     <Deterministic>true</Deterministic>
     <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
   </PropertyGroup>

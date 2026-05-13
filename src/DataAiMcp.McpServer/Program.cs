@@ -1,3 +1,4 @@
+using Azure.Monitor.OpenTelemetry.AspNetCore;
 using Azure.Search.Documents;
 using DataAiMcp.McpServer.Auth;
 using DataAiMcp.McpServer.Rag;

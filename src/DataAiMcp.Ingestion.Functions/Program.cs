@@ -4,6 +4,7 @@ using DataAiMcp.Ingestion.Functions.Pipeline;
 using DataAiMcp.Shared.Auth;
 using DataAiMcp.Shared.DependencyInjection;
 using DataAiMcp.Shared.Search;
+using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Builder;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;

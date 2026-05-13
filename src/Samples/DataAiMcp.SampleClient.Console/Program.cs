@@ -30,7 +30,9 @@ var transport = new SseClientTransport(new SseClientTransportOptions
 {
     Endpoint = new Uri($"{baseUrl}/mcp"),
     Name = "data-ai-mcp",
-    AdditionalHeaders =
+    // AdditionalHeaders is nullable; assign a new dictionary instead of using a nested
+    // collection initializer (CS8670 in newer ModelContextProtocol previews).
+    AdditionalHeaders = new Dictionary<string, string>
     {
         ["Authorization"] = $"Bearer {token.Token}",
     },

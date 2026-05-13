@@ -46,7 +46,7 @@ public sealed class MarkdownChunker
         return chunks;
     }
 
-    private List<Section> SplitSections(MarkdownDocument doc, string source)
+    private static List<Section> SplitSections(MarkdownDocument doc, string source)
     {
         var sections = new List<Section>();
         var headingStack = new List<string>(8);

@@ -68,11 +68,14 @@ public sealed class DataLakeRepository : IDataLakeRepository
         await foreach (var path in fs.GetPathsAsync(prefix, recursive: true, cancellationToken: cancellationToken).ConfigureAwait(false))
         {
             if (path.IsDirectory == true) continue;
+            // Azure.Storage.Files.DataLake 12.21.0 made PathItem.ETag a non-nullable ETag struct.
+            // Preserve previous null-when-missing semantics by mapping default(ETag) to null.
+            var etag = path.ETag == default ? null : path.ETag.ToString();
             yield return new DataLakeItem(
                 path.Name,
                 path.ContentLength ?? 0,
                 path.LastModified,
-                path.ETag?.ToString());
+                etag);
         }
     }
 

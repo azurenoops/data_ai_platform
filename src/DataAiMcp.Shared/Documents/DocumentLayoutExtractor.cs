@@ -31,12 +31,15 @@ public sealed class DocumentLayoutExtractor
         ms.Position = 0;
         var binary = BinaryData.FromStream(ms);
 
+        // Azure.AI.DocumentIntelligence 1.0.0 GA moved analyze inputs into AnalyzeDocumentOptions.
+        var analyzeOptions = new AnalyzeDocumentOptions("prebuilt-layout", binary)
+        {
+            OutputContentFormat = DocumentContentFormat.Markdown,
+        };
         var operation = await _client.AnalyzeDocumentAsync(
             WaitUntil.Completed,
-            modelId: "prebuilt-layout",
-            bytesSource: binary,
-            outputContentFormat: DocumentContentFormat.Markdown,
-            cancellationToken: cancellationToken).ConfigureAwait(false);
+            analyzeOptions,
+            cancellationToken).ConfigureAwait(false);
 
         var result = operation.Value;
         _logger.LogInformation("DocIntel extracted {Pages} pages, {Chars} chars.", result.Pages?.Count ?? 0, result.Content?.Length ?? 0);
