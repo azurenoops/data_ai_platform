@@ -48,6 +48,12 @@ resource "azurerm_linux_function_app" "this" {
   storage_account_name          = var.storage_account_name
   storage_uses_managed_identity = true
 
+  # Preemptive lockdown for Navy NIST 800-53 Custom Policy "App Service apps
+  # should disable public network access". The ingestion functions are only
+  # triggered internally (blob / timer) so losing public HTTP access is a
+  # non-issue here.
+  public_network_access_enabled = false
+
   https_only                      = true
   key_vault_reference_identity_id = var.user_assigned_identity_id
 

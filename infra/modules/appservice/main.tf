@@ -27,6 +27,13 @@ resource "azurerm_linux_web_app" "this" {
 
   virtual_network_subnet_id = var.virtual_network_subnet_id
 
+  # Navy NIST 800-53 Custom Policy "App Service apps should disable public
+  # network access" denies creation otherwise. Inbound public traffic is
+  # blocked - external clients reach the MCP server through Front Door
+  # (Premium + Private Link Service required) or an inbound PE in the VNet.
+  # See the v1 PE scaffold's "Out of scope" notes for the follow-up work.
+  public_network_access_enabled = false
+
   https_only                      = true
   key_vault_reference_identity_id = var.user_assigned_identity_id
 
