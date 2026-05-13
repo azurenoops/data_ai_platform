@@ -3,8 +3,12 @@ terraform {
 
   required_providers {
     azurerm = {
-      source  = "hashicorp/azurerm"
-      version = "~> 4.18"
+      source = "hashicorp/azurerm"
+      # Upper bound: azurerm 4.71.0 bumped the storage API to 2025-08-01, which
+      # Azure Government does not yet support (max is 2025-06-01). Bootstrap
+      # provisions storage on Gov, so we cap below 4.71. Revisit when Gov adds
+      # 2025-08-01 to the supported list.
+      version = ">= 4.18, < 4.71"
     }
   }
 }
@@ -106,6 +110,12 @@ resource "azurerm_role_assignment" "ci_state_writer" {
   scope              = azurerm_storage_account.state.id
   role_definition_id = data.azurerm_role_definition.blob_data_contributor.id
   principal_id       = var.ci_principal_id
+  # Required by the Limited User Access Administrator ABAC condition on this
+  # subscription, which only permits role-assignment writes when the request
+  # carries PrincipalType == ServicePrincipal. Without this attribute set
+  # explicitly the azurerm provider omits PrincipalType from the request and
+  # the condition fails with HTTP 403 AuthorizationFailed.
+  principal_type = "ServicePrincipal"
 }
 
 output "state_resource_group_name" {

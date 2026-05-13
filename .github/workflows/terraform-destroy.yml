@@ -14,16 +14,22 @@ on:
         type: string
 
 permissions:
-  id-token: write
   contents: read
 
 env:
   TF_VERSION: 1.9.8
   TF_IN_AUTOMATION: 'true'
-  ARM_USE_OIDC: 'true'
+  # See terraform.yml for rationale: forces azurerm provider to skip the az
+  # CLI probe and use ARM_CLIENT_SECRET directly.
+  ARM_USE_CLI: 'false'
   ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
   ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
   ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+  # Azure US Government cloud. Read by both the azurerm provider and the
+  # azurerm backend. Drop / change to 'public' (or remove) if retargeting
+  # commercial Azure. See docs/DEPLOYMENT.md §15.5.
+  ARM_ENVIRONMENT: 'usgovernment'
 
 jobs:
   destroy:
@@ -45,12 +51,12 @@ jobs:
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
-      - name: Azure login (OIDC)
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      # NOTE: no `azure/login` here. Terraform reads SP credentials from the
+      # ARM_* env vars (workflow-level) and the explicit -backend-config
+      # flags below. Logging the az CLI in as an SP triggers "Authenticating
+      # using the Azure CLI is only supported as a User (not a Service
+      # Principal)" because the backend probes the active CLI session even
+      # when explicit creds are present.
 
       - name: terraform init
         working-directory: infra
@@ -60,12 +66,61 @@ jobs:
             -backend-config="storage_account_name=${{ vars.TFSTATE_STORAGE_ACCOUNT }}" \
             -backend-config="container_name=${{ vars.TFSTATE_CONTAINER }}" \
             -backend-config="key=data-ai-mcp.tfstate" \
-            -backend-config="use_oidc=true" \
+            -backend-config="environment=usgovernment" \
+            -backend-config="use_azuread_auth=true" \
+            -backend-config="tenant_id=${{ secrets.AZURE_TENANT_ID }}" \
+            -backend-config="subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
+            -backend-config="client_id=${{ secrets.AZURE_CLIENT_ID }}" \
+            -backend-config="client_secret=${{ secrets.AZURE_CLIENT_SECRET }}" \
             -input=false
 
       - name: terraform workspace
         working-directory: infra
         run: terraform workspace select "${{ github.event.inputs.environment }}"
+
+      - name: Write tfvars from GitHub Variables
+        working-directory: infra
+        env:
+          WORKSPACE: ${{ github.event.inputs.environment }}
+          # See docs/DEPLOYMENT.md §15.4. tfvars files are gitignored; CI
+          # reconstructs them from repo-scoped GitHub Variables.
+          TFVARS_CONTENT: ${{ github.event.inputs.environment == 'dev' && vars.TFVARS_DEV || vars.TFVARS_PROD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TFVARS_CONTENT}" ]; then
+            VAR_NAME="TFVARS_$(echo "${WORKSPACE}" | tr '[:lower:]' '[:upper:]')"
+            echo "::error::GitHub repo variable ${VAR_NAME} is not set. Populate it with the contents of envs/${WORKSPACE}.tfvars. See docs/DEPLOYMENT.md §15.4."
+            exit 1
+          fi
+          mkdir -p envs
+          printf '%s\n' "${TFVARS_CONTENT}" > "envs/${WORKSPACE}.tfvars"
+          echo "::add-mask::${TFVARS_CONTENT}"
+
+      - name: Validate tfvars (no smart quotes)
+        working-directory: infra
+        # See terraform.yml for the full rationale. Only flags ‘ ’ “ ” ;
+        # other non-ASCII (em-dash, section sign, accented chars) is valid
+        # HCL and not flagged.
+        env:
+          WORKSPACE: ${{ github.event.inputs.environment }}
+        run: |
+          set -euo pipefail
+          FILE="envs/${WORKSPACE}.tfvars"
+          if grep -nP '[\x{2018}\x{2019}\x{201C}\x{201D}]' "${FILE}" > /tmp/smartquotes.txt; then
+            echo "::error file=infra/${FILE}::Smart quotes detected in tfvars. Replace ‘ ’ “ ” with ASCII ' and \"."
+            while IFS=: read -r line rest; do
+              echo "::error file=infra/${FILE},line=${line}::Smart quote on this line: ${rest}"
+            done < /tmp/smartquotes.txt
+            echo "Update the TFVARS_${WORKSPACE^^} repo Variable and re-run."
+            exit 1
+          fi
+          echo "tfvars smart-quote check passed."
+
+      - name: terraform fmt (auto-format tfvars)
+        working-directory: infra
+        # Auto-format the tfvars file rather than fail on it. See terraform.yml
+        # for the rationale. No `-check` — silently rewrites.
+        run: terraform fmt envs/
 
       - name: terraform destroy
         working-directory: infra

@@ -1,0 +1,284 @@
+name: terraform-bootstrap
+
+# ---------------------------------------------------------------------------
+# One-shot CI bootstrap of the Terraform state backend.
+#
+# Why this exists: operators in restricted environments (e.g. NVD-isolated
+# workstations) cannot run `az login` / `terraform apply` locally, so the
+# bootstrap procedure documented in infra/bootstrap/README.md has to run in
+# GitHub Actions. This workflow replaces the manual local-CLI flow.
+#
+# Design notes:
+#   * Trigger is `workflow_dispatch` only — this is a rare, intentional op.
+#   * Bootstrap uses **local state** by design (chicken-and-egg with the SA
+#     it creates). We persist that local state across workflow runs via
+#     `actions/cache` so re-runs see the existing state.
+#   * If the cache is evicted (7-day idle) or the run is first-ever, the
+#     `Import existing resources` step rehydrates state via `terraform
+#     import` against deterministically-computed resource IDs. This makes
+#     the workflow self-healing.
+#   * Outputs are surfaced in $GITHUB_STEP_SUMMARY as a paste-ready table
+#     for the operator to copy into the repo Variables UI.
+#   * Concurrency lock prevents two bootstraps for the same env from
+#     racing each other.
+# ---------------------------------------------------------------------------
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment_name:
+        description: 'State environment name (suffix for the state RG/SA; usually "shared", "dev", or "prod")'
+        required: true
+        default: shared
+        type: string
+      location:
+        description: 'Azure region for the state RG / storage account'
+        required: true
+        default: eastus2
+        type: string
+      ci_principal_id:
+        description: 'Object ID of the CI service principal to grant Storage Blob Data Contributor on the state SA (leave empty to skip)'
+        required: false
+        default: ''
+        type: string
+      azure_environment:
+        description: 'Azure cloud (public or usgovernment)'
+        required: true
+        default: public
+        type: choice
+        options:
+          - public
+          - usgovernment
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terraform-bootstrap-${{ inputs.environment_name }}
+  cancel-in-progress: false
+
+env:
+  TF_VERSION: 1.9.8
+  TF_IN_AUTOMATION: 'true'
+  # See terraform.yml for rationale: forces azurerm provider to skip the az
+  # CLI probe and use ARM_CLIENT_SECRET directly.
+  ARM_USE_CLI: 'false'
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+  ARM_ENVIRONMENT: ${{ inputs.azure_environment }}
+
+jobs:
+  bootstrap:
+    name: bootstrap terraform state backend
+    runs-on: ubuntu-latest
+    # Gated by a GitHub Environment so a reviewer must approve the bootstrap.
+    # Use the same env name as the input (operator creates 'shared'/'dev'/'prod'
+    # GitHub Environments with required reviewers attached).
+    environment:
+      name: ${{ inputs.environment_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Azure login (client secret)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          environment: ${{ inputs.azure_environment == 'usgovernment' && 'AzureUSGovernment' || 'AzureCloud' }}
+
+      # -------------------------------------------------------------------
+      # Cross-run state persistence.
+      #
+      # actions/cache survives across workflow runs (default 7-day idle
+      # eviction; 10 GB total cache per repo). Re-runs of this workflow
+      # within 7 days will restore the previous state file directly. After
+      # eviction, the import step below rehydrates state from Azure.
+      # -------------------------------------------------------------------
+      - name: Restore bootstrap state from cache
+        id: cache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            infra/bootstrap/terraform.tfstate
+            infra/bootstrap/terraform.tfstate.backup
+          key: bootstrap-tfstate-${{ inputs.environment_name }}-${{ github.run_id }}
+          restore-keys: |
+            bootstrap-tfstate-${{ inputs.environment_name }}-
+
+      - name: terraform init (local state)
+        working-directory: infra/bootstrap
+        run: terraform init -input=false
+
+      # -------------------------------------------------------------------
+      # Compute the resource names Terraform would generate. Mirrors the
+      # `local.state_token` / `local.state_rg_name` / `local.state_sa_name`
+      # block in infra/bootstrap/main.tf. Keep these formulas in sync.
+      # -------------------------------------------------------------------
+      - name: Compute deterministic resource names
+        id: names
+        env:
+          ENV: ${{ inputs.environment_name }}
+          SUB: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        run: |
+          set -euo pipefail
+          # sha1("<sub>-tfstate-<env>") | substr(0,13) | lower
+          TOKEN=$(printf '%s' "${SUB}-tfstate-${ENV}" | shasum -a 1 | awk '{print $1}' | cut -c1-13 | tr 'A-Z' 'a-z')
+          RG="rg-tfstate-${ENV}"
+          # "sttfstate<token>" with dashes stripped, capped to 24 chars
+          SA=$(printf 'sttfstate%s' "$TOKEN" | tr -d '-' | cut -c1-24)
+          {
+            echo "state_token=$TOKEN"
+            echo "rg=$RG"
+            echo "sa=$SA"
+            echo "container=tfstate"
+            echo "rg_id=/subscriptions/${SUB}/resourceGroups/${RG}"
+            echo "sa_id=/subscriptions/${SUB}/resourceGroups/${RG}/providers/Microsoft.Storage/storageAccounts/${SA}"
+            # azurerm_storage_container import takes the ARM resource ID (provider >= 4.0).
+            echo "container_id=/subscriptions/${SUB}/resourceGroups/${RG}/providers/Microsoft.Storage/storageAccounts/${SA}/blobServices/default/containers/tfstate"
+          } >> "$GITHUB_OUTPUT"
+          echo "Computed: rg=$RG sa=$SA container=tfstate"
+
+      # -------------------------------------------------------------------
+      # Import existing Azure resources if they are missing from state.
+      # Handles two cases without operator intervention:
+      #   1. First-ever bootstrap → all imports fail with "not found", we
+      #      detect that and fall through to apply (which creates them).
+      #   2. Cache-evicted re-run → resources exist in Azure but state is
+      #      empty; imports rehydrate state so the subsequent apply is a
+      #      no-op or a minor tag drift.
+      #
+      # Any import failure that is NOT a "resource not found" condition is
+      # surfaced as a hard error — we don't paper over unexpected provider
+      # errors.
+      # -------------------------------------------------------------------
+      - name: Import existing resources if missing from state
+        working-directory: infra/bootstrap
+        env:
+          RG_ID: ${{ steps.names.outputs.rg_id }}
+          SA_ID: ${{ steps.names.outputs.sa_id }}
+          CONTAINER_ID: ${{ steps.names.outputs.container_id }}
+          ENV: ${{ inputs.environment_name }}
+          LOCATION: ${{ inputs.location }}
+          CI_PRINCIPAL: ${{ inputs.ci_principal_id }}
+        run: |
+          set -uo pipefail
+
+          # Common -var flags reused by every `terraform import` invocation.
+          VAR_FLAGS=(
+            -var="environment_name=${ENV}"
+            -var="location=${LOCATION}"
+            -var="ci_principal_id=${CI_PRINCIPAL}"
+          )
+
+          import_if_missing() {
+            local addr="$1"
+            local id="$2"
+            if terraform state show "$addr" >/dev/null 2>&1; then
+              echo "[skip] already in state: $addr"
+              return 0
+            fi
+            echo "[try ] import $addr <- $id"
+            local log
+            log=$(mktemp)
+            if terraform import "${VAR_FLAGS[@]}" "$addr" "$id" >"$log" 2>&1; then
+              echo "[ok  ] imported $addr"
+              cat "$log"
+              return 0
+            fi
+            cat "$log"
+            # Acceptable not-found patterns (first-time bootstrap). Anything
+            # else is a real provider error and must fail the run.
+            if grep -Eqi 'could not be found|ResourceNotFound|ResourceGroupNotFound|status: 404|status=404|cannot import non-existent|does not exist' "$log"; then
+              echo "[miss] not in Azure yet (first-time bootstrap): $addr"
+              return 0
+            fi
+            echo "::error::Non-recoverable import error for $addr — see log above."
+            return 1
+          }
+
+          import_if_missing azurerm_resource_group.state         "$RG_ID"
+          import_if_missing azurerm_storage_account.state        "$SA_ID"
+          import_if_missing azurerm_storage_container.tfstate    "$CONTAINER_ID"
+
+          # NOTE: azurerm_role_assignment.ci_state_writer is intentionally not
+          # imported here. Its GUID is generated by Azure at create time and
+          # is not derivable from inputs. If the cache is evicted AND the role
+          # assignment already exists in Azure, the apply step below will fail
+          # with RoleAssignmentExists (409). Resolution: leave ci_principal_id
+          # empty on re-runs unless the prior assignment was deleted, or
+          # import the assignment manually after looking up its GUID via
+          # `az role assignment list` from a runner.
+
+      - name: terraform plan
+        working-directory: infra/bootstrap
+        run: |
+          terraform plan \
+            -var="environment_name=${{ inputs.environment_name }}" \
+            -var="location=${{ inputs.location }}" \
+            -var="ci_principal_id=${{ inputs.ci_principal_id }}" \
+            -input=false -no-color | tee tfplan.txt
+
+      - name: terraform apply
+        working-directory: infra/bootstrap
+        run: |
+          terraform apply -auto-approve \
+            -var="environment_name=${{ inputs.environment_name }}" \
+            -var="location=${{ inputs.location }}" \
+            -var="ci_principal_id=${{ inputs.ci_principal_id }}" \
+            -input=false
+
+      - name: Capture outputs
+        id: tfout
+        working-directory: infra/bootstrap
+        run: |
+          set -euo pipefail
+          {
+            echo "rg=$(terraform output -raw state_resource_group_name)"
+            echo "sa=$(terraform output -raw state_storage_account_name)"
+            echo "container=$(terraform output -raw state_container_name)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Save bootstrap state to cache
+        if: always() && hashFiles('infra/bootstrap/terraform.tfstate') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            infra/bootstrap/terraform.tfstate
+            infra/bootstrap/terraform.tfstate.backup
+          key: bootstrap-tfstate-${{ inputs.environment_name }}-${{ github.run_id }}
+
+      - name: Summary
+        if: success()
+        env:
+          RG: ${{ steps.tfout.outputs.rg }}
+          SA: ${{ steps.tfout.outputs.sa }}
+          CN: ${{ steps.tfout.outputs.container }}
+          ENV: ${{ inputs.environment_name }}
+        run: |
+          {
+            echo "## Bootstrap complete (\`${ENV}\`)"
+            echo ""
+            echo "Set the following **GitHub Actions repository variables** (Settings → Secrets and variables → Actions → Variables). These feed the \`terraform.yml\` and \`terraform-destroy.yml\` workflows:"
+            echo ""
+            echo "| Variable | Value |"
+            echo "| --- | --- |"
+            echo "| \`TFSTATE_RESOURCE_GROUP\` | \`${RG}\` |"
+            echo "| \`TFSTATE_STORAGE_ACCOUNT\` | \`${SA}\` |"
+            echo "| \`TFSTATE_CONTAINER\` | \`${CN}\` |"
+            echo ""
+            echo "Bootstrap state is preserved in the \`bootstrap-tfstate-${ENV}-<run_id>\` GitHub Actions cache (7-day idle eviction). Re-runs are self-healing via \`terraform import\` if the cache is evicted."
+            echo ""
+            echo "### Next steps"
+            echo ""
+            echo "1. Populate the three repo variables above."
+            echo "2. Populate \`TFVARS_DEV\` and/or \`TFVARS_PROD\` with the contents of your local \`infra/envs/<env>.tfvars\` files (see [\`docs/DEPLOYMENT.md\` §15.4](../blob/main/docs/DEPLOYMENT.md#154-github-actions-repository-variables-tfvars-content))."
+            echo "3. Run the \`terraform\` workflow with the desired environment input."
+          } >> "$GITHUB_STEP_SUMMARY"

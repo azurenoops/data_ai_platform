@@ -23,7 +23,6 @@ on:
         options: [dev, prod]
 
 permissions:
-  id-token: write
   contents: read
   pull-requests: write
 
@@ -31,10 +30,20 @@ env:
   TF_VERSION: 1.9.8
   TFLINT_VERSION: v0.55.1
   TF_IN_AUTOMATION: 'true'
-  ARM_USE_OIDC: 'true'
+  # Force azurerm provider to use ARM_CLIENT_SECRET env vars directly instead
+  # of probing the Azure CLI. azure/login@v2 with client-secret logs the CLI
+  # in as a service principal, which the provider then refuses to use ("CLI
+  # auth is only supported as a User, not a Service Principal"). Setting this
+  # to false makes the provider skip the CLI probe and use ARM_* env vars.
+  ARM_USE_CLI: 'false'
   ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
   ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
   ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+  # Azure US Government cloud. Read by both the azurerm provider and the
+  # azurerm backend. Drop / change to 'public' (or remove) if retargeting
+  # commercial Azure. See docs/DEPLOYMENT.md §15.5.
+  ARM_ENVIRONMENT: 'usgovernment'
   WORKSPACE: ${{ github.event.inputs.environment || (github.event_name == 'pull_request' && 'dev') || 'prod' }}
 
 jobs:
@@ -83,12 +92,14 @@ jobs:
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
-      - name: Azure login (OIDC)
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      # NOTE: no `azure/login` here. Terraform reads SP credentials from the
+      # ARM_CLIENT_ID/ARM_CLIENT_SECRET/ARM_TENANT_ID/ARM_SUBSCRIPTION_ID env
+      # vars (set at workflow level) and via the explicit -backend-config
+      # flags below. Logging the az CLI in as an SP triggers
+      # "Authenticating using the Azure CLI is only supported as a User
+      # (not a Service Principal)" because both the azurerm provider and the
+      # backend will probe the active CLI session even when explicit creds
+      # are present. The terraform binary does not need an az CLI session.
 
       - name: terraform init
         working-directory: infra
@@ -98,13 +109,79 @@ jobs:
             -backend-config="storage_account_name=${{ vars.TFSTATE_STORAGE_ACCOUNT }}" \
             -backend-config="container_name=${{ vars.TFSTATE_CONTAINER }}" \
             -backend-config="key=data-ai-mcp.tfstate" \
-            -backend-config="use_oidc=true" \
+            -backend-config="environment=usgovernment" \
+            -backend-config="use_azuread_auth=true" \
+            -backend-config="tenant_id=${{ secrets.AZURE_TENANT_ID }}" \
+            -backend-config="subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
+            -backend-config="client_id=${{ secrets.AZURE_CLIENT_ID }}" \
+            -backend-config="client_secret=${{ secrets.AZURE_CLIENT_SECRET }}" \
             -input=false
 
       - name: terraform workspace
         working-directory: infra
         run: |
           terraform workspace select -or-create "${WORKSPACE}"
+
+      - name: Write tfvars from GitHub Variables
+        working-directory: infra
+        env:
+          # vars.TFVARS_DEV / vars.TFVARS_PROD hold the full contents of the
+          # envs/<env>.tfvars file. They are repo-scoped GitHub Variables
+          # (Settings → Secrets and variables → Actions → Variables). The
+          # tfvars files themselves are gitignored (.gitignore line 37).
+          TFVARS_CONTENT: ${{ env.WORKSPACE == 'dev' && vars.TFVARS_DEV || vars.TFVARS_PROD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TFVARS_CONTENT}" ]; then
+            VAR_NAME="TFVARS_$(echo "${WORKSPACE}" | tr '[:lower:]' '[:upper:]')"
+            echo "::error::GitHub repo variable ${VAR_NAME} is not set. Populate it with the contents of envs/${WORKSPACE}.tfvars. See docs/DEPLOYMENT.md §15.4."
+            exit 1
+          fi
+          mkdir -p envs
+          printf '%s\n' "${TFVARS_CONTENT}" > "envs/${WORKSPACE}.tfvars"
+          # Mask the content from logs in case the operator stored sensitive values.
+          echo "::add-mask::${TFVARS_CONTENT}"
+          echo "Wrote envs/${WORKSPACE}.tfvars ($(wc -c < "envs/${WORKSPACE}.tfvars") bytes)"
+
+      - name: Validate tfvars (no smart quotes)
+        working-directory: infra
+        # Operators frequently paste tfvars content into the TFVARS_DEV /
+        # TFVARS_PROD repo Variables from Word/Outlook/Confluence editors that
+        # auto-convert ASCII quotes (") to typographic quotes (U+201C “ /
+        # U+201D ”). Terraform's parser does not recognize those as string
+        # delimiters, so a single curly quote produces a cascade of
+        # "Invalid multi-line string" errors that obscure the real issue.
+        #
+        # Scope: ONLY smart-quote characters (‘ ’ “ ”). Other non-ASCII
+        # (em-dashes, section signs, accented chars) is valid HCL inside
+        # comments and strings, so we don't flag it.
+        run: |
+          set -euo pipefail
+          FILE="envs/${WORKSPACE}.tfvars"
+          # \xe2\x80\x98 = ‘ (U+2018), \xe2\x80\x99 = ’ (U+2019)
+          # \xe2\x80\x9c = “ (U+201C), \xe2\x80\x9d = ” (U+201D)
+          if grep -nP '[\x{2018}\x{2019}\x{201C}\x{201D}]' "${FILE}" > /tmp/smartquotes.txt; then
+            echo "::error file=infra/${FILE}::Smart quotes detected in tfvars. Terraform's HCL parser does not recognize ‘ ’ “ ” as string delimiters and will fail with cryptic 'Invalid multi-line string' cascades. Replace with ASCII ' and \"."
+            while IFS=: read -r line rest; do
+              echo "::error file=infra/${FILE},line=${line}::Smart quote on this line: ${rest}"
+            done < /tmp/smartquotes.txt
+            echo ""
+            echo "Fix: in the TFVARS_${WORKSPACE^^} repo Variable (Settings -> Secrets and variables -> Actions -> Variables), replace:"
+            echo "  “ ”  -> \""
+            echo "  ‘ ’  -> '"
+            echo "Then re-run this workflow."
+            exit 1
+          fi
+          echo "tfvars smart-quote check passed."
+
+      - name: terraform fmt (auto-format tfvars)
+        working-directory: infra
+        # Auto-format the tfvars file rather than fail on it. Operators paste
+        # tfvars contents into the TFVARS_DEV / TFVARS_PROD repo Variables; this
+        # step normalizes whitespace / alignment so `terraform plan` always sees
+        # canonical formatting, even if the pasted text was not run through
+        # `terraform fmt` locally first. No `-check` flag — silently rewrites.
+        run: terraform fmt envs/
 
       - name: terraform plan
         id: plan
@@ -117,7 +194,9 @@ jobs:
             -no-color
           terraform show -no-color tfplan > tfplan.txt
 
-      - uses: actions/upload-artifact@v4
+      # GHES does not support actions/upload-artifact@v4+ (new artifact backend);
+      # pin to v3, the last major that works on both github.com and GHES.
+      - uses: actions/upload-artifact@v3
         with:
           name: tfplan-${{ env.WORKSPACE }}
           path: |
@@ -158,12 +237,7 @@ jobs:
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
-      - name: Azure login (OIDC)
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      # NOTE: no `azure/login` here. See plan job for rationale.
 
       - name: terraform init
         working-directory: infra
@@ -173,14 +247,20 @@ jobs:
             -backend-config="storage_account_name=${{ vars.TFSTATE_STORAGE_ACCOUNT }}" \
             -backend-config="container_name=${{ vars.TFSTATE_CONTAINER }}" \
             -backend-config="key=data-ai-mcp.tfstate" \
-            -backend-config="use_oidc=true" \
+            -backend-config="environment=usgovernment" \
+            -backend-config="use_azuread_auth=true" \
+            -backend-config="tenant_id=${{ secrets.AZURE_TENANT_ID }}" \
+            -backend-config="subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
+            -backend-config="client_id=${{ secrets.AZURE_CLIENT_ID }}" \
+            -backend-config="client_secret=${{ secrets.AZURE_CLIENT_SECRET }}" \
             -input=false
 
       - name: terraform workspace
         working-directory: infra
         run: terraform workspace select -or-create "${WORKSPACE}"
 
-      - uses: actions/download-artifact@v4
+      # GHES: pin to v3 (matches the upload version in the plan job).
+      - uses: actions/download-artifact@v3
         with:
           name: tfplan-${{ env.WORKSPACE }}
           path: infra
@@ -193,8 +273,95 @@ jobs:
         working-directory: infra
         run: terraform output -json > tfout.json
 
-      - uses: actions/upload-artifact@v4
+      # GHES: pin to v3.
+      - uses: actions/upload-artifact@v3
         with:
           name: tfout-${{ env.WORKSPACE }}
           path: infra/tfout.json
           retention-days: 14
+
+  deploy:
+    name: deploy app code
+    needs: apply
+    # Mirrors the apply job's trigger gate. PRs never deploy; only push-to-main
+    # and explicit workflow_dispatch.
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ github.event.inputs.environment || 'prod' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      # `azure/login@v2` defaults to AzureCloud (public). The platform deploys
+      # to US Gov (matches ARM_ENVIRONMENT=usgovernment above), so the az CLI
+      # must be pointed at the Gov endpoints or the webapp/functionapp lookups
+      # below will fail with "ResourceNotFound".
+      - name: Azure login (client secret, Gov cloud)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          environment: AzureUSGovernment
+
+      # In-workflow artifact download — the apply job uploaded tfout in the
+      # SAME workflow run, so @v3 (the last GHES-compatible version) works
+      # without the v4-only cross-run `run-id` / `github-token` parameters.
+      - uses: actions/download-artifact@v3
+        with:
+          name: tfout-${{ env.WORKSPACE }}
+          path: infra
+
+      - name: Export terraform outputs
+        run: |
+          set -eu
+          test -f infra/tfout.json
+          echo "RESOURCE_GROUP=$(jq -r '.AZURE_RESOURCE_GROUP.value' infra/tfout.json)" >> "$GITHUB_ENV"
+          echo "APP_SERVICE_NAME=$(jq -r '.APP_SERVICE_NAME.value' infra/tfout.json)" >> "$GITHUB_ENV"
+          echo "FUNCTION_APP_NAME=$(jq -r '.FUNCTION_APP_NAME.value' infra/tfout.json)" >> "$GITHUB_ENV"
+          echo "MCP_SERVER_BASE_URL=$(jq -r '.MCP_SERVER_BASE_URL.value' infra/tfout.json)" >> "$GITHUB_ENV"
+
+      - name: Build & publish MCP server
+        run: |
+          dotnet publish src/DataAiMcp.McpServer/DataAiMcp.McpServer.csproj \
+            --configuration Release \
+            --output publish/mcp-server \
+            /p:UseAppHost=false
+          (cd publish/mcp-server && zip -qr ../mcp-server.zip .)
+
+      - name: Build & publish ingestion functions
+        run: |
+          dotnet publish src/DataAiMcp.Ingestion.Functions/DataAiMcp.Ingestion.Functions.csproj \
+            --configuration Release \
+            --output publish/functions \
+            /p:UseAppHost=false
+          (cd publish/functions && zip -qr ../functions.zip .)
+
+      - name: Deploy MCP server (App Service)
+        run: |
+          az webapp deploy \
+            --resource-group "${RESOURCE_GROUP}" \
+            --name "${APP_SERVICE_NAME}" \
+            --type zip \
+            --src-path publish/mcp-server.zip \
+            --restart true
+
+      - name: Deploy ingestion functions (FlexConsumption)
+        run: |
+          az functionapp deployment source config-zip \
+            --resource-group "${RESOURCE_GROUP}" \
+            --name "${FUNCTION_APP_NAME}" \
+            --src publish/functions.zip
+
+      - name: Run postdeploy smoke
+        env:
+          TFOUT_JSON: ${{ github.workspace }}/infra/tfout.json
+        run: |
+          chmod +x infra/scripts/postdeploy.sh
+          infra/scripts/postdeploy.sh
