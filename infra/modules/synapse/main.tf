@@ -53,8 +53,13 @@ resource "azurerm_synapse_workspace" "this" {
   }
 }
 
+# Azure validation requires the rule name to be EXACTLY "AllowAllWindowsAzureIps"
+# when start_ip == end_ip == 0.0.0.0 (this is the magic "Allow Azure services"
+# entry). Any other name returns:
+#   Code="ValidationFailed" InvalidRuleNameForAllowAllAzureIpsRule
+# See: https://learn.microsoft.com/azure/synapse-analytics/security/synapse-workspace-ip-firewall
 resource "azurerm_synapse_firewall_rule" "allow_azure" {
-  name                 = "AllowAllAzureServices"
+  name                 = "AllowAllWindowsAzureIps"
   synapse_workspace_id = azurerm_synapse_workspace.this.id
   start_ip_address     = "0.0.0.0"
   end_ip_address       = "0.0.0.0"

@@ -91,11 +91,9 @@ module "functions" {
   resource_group_name              = var.resource_group_name
   location                         = var.location
   tags                             = merge(var.tags, { "azd-service-name" = "ingestion-functions" })
-  plan_name                        = "${var.abbrs.appServicePlans}-flex-dr-${var.resource_token}"
+  plan_name                        = "${var.abbrs.appServicePlans}-ep1-dr-${var.resource_token}"
   function_app_name                = "${var.abbrs.functionApps}-ing-dr-${var.resource_token}"
   storage_account_name             = module.storage.storage_account_name
-  storage_dfs_endpoint             = module.storage.dfs_endpoint
-  deployment_container_name        = "deploy"
   user_assigned_identity_id        = var.ingestion_user_assigned_identity_id
   user_assigned_identity_client_id = var.ingestion_user_assigned_identity_client_id
   app_insights_connection_string   = var.app_insights_connection_string

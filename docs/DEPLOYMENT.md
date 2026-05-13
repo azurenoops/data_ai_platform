@@ -22,7 +22,8 @@ This guide is intentionally exhaustive. Read it through once before running any 
 > **Required GitHub Actions configuration:**
 >
 > - **Secrets:** `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` (federated identity for OIDC login).
-> - **Variables:** `TFSTATE_RESOURCE_GROUP`, `TFSTATE_STORAGE_ACCOUNT`, `TFSTATE_CONTAINER` (output of the `infra/bootstrap/` run; see [infra/bootstrap/README.md](../infra/bootstrap/README.md)).
+> - **Variables (Terraform backend):** `TFSTATE_RESOURCE_GROUP`, `TFSTATE_STORAGE_ACCOUNT`, `TFSTATE_CONTAINER` (output of the `infra/bootstrap/` run; see [infra/bootstrap/README.md](../infra/bootstrap/README.md)).
+> - **Variables (tfvars content):** `TFVARS_DEV`, `TFVARS_PROD` — full text contents of `infra/envs/dev.tfvars` and `infra/envs/prod.tfvars` respectively. The tfvars files are gitignored (`.gitignore` line 37: `*.tfvars`), so CI reconstructs them from these variables. See [§15.4](#154-github-actions-repository-variables-tfvars-content).
 > - **Environments:** `dev` and `prod` GitHub environments with required reviewers configured for the `apply` job approval gate.
 >
 > The body of this document still uses Azure-Government-specific guidance which is unchanged. Treat the `azd`/`bicep` commands below as historical context — the canonical workflow is the Terraform commands above and in [§8](#8-provision-infrastructure-azd-provision) / [§11](#11-deploy-application-code-azd-deploy) section bodies (now updated to Terraform).
@@ -313,6 +314,20 @@ The Terraform configuration uses **workspaces** to isolate state per environment
 
 ### 7.1 First-time only — bootstrap remote state
 
+You have two ways to run the bootstrap. Both produce the same Azure resources and the same three outputs.
+
+#### Option A — CI-driven (recommended for restricted environments / no local Azure CLI)
+
+Use this when operators can't run `az login` and `terraform` from their workstation (e.g. NVD-isolated machines, locked-down Gov endpoints).
+
+1. GitHub UI → **Actions** → **terraform-bootstrap** → **Run workflow**.
+2. Pick `environment_name` (e.g. `shared`), `location`, optionally `ci_principal_id`, and `azure_environment` (`public` or `usgovernment`).
+3. When the workflow finishes, copy the three values from the job summary into **Settings → Secrets and variables → Actions → Variables** as `TFSTATE_RESOURCE_GROUP`, `TFSTATE_STORAGE_ACCOUNT`, `TFSTATE_CONTAINER`.
+
+The workflow uses OIDC federated identity (no client secrets), persists the bootstrap state in the GitHub Actions cache for fast re-runs, and self-heals via `terraform import` if the cache is evicted. Full design notes in [infra/bootstrap/README.md](../infra/bootstrap/README.md).
+
+#### Option B — Local (operator workstation)
+
 ```bash
 cd infra/bootstrap
 terraform init
@@ -354,6 +369,8 @@ front_door_sku        = "Standard_AzureFrontDoor"
 ```
 
 The complete schema is in [infra/variables.tf](../infra/variables.tf).
+
+> **`*.tfvars` is gitignored.** The file lives on your workstation only; CI reconstructs it from the `TFVARS_DEV` / `TFVARS_PROD` GitHub repo variables before running `terraform plan` (see [§15.4](#154-github-actions-repository-variables-tfvars-content)). Every change must be applied in **both** places — local file (for `terraform plan` from your workstation) and GitHub Variable (for CI). There is no automatic sync.
 
 ### 7.4 Reuse existing resources (skip-create toggles)
 
@@ -813,7 +830,31 @@ The Terraform workflows pull the remote-state location from **repository variabl
 | `TFSTATE_STORAGE_ACCOUNT` | `tfstate_storage_account` |
 | `TFSTATE_CONTAINER` | `tfstate_container` (typically `tfstate`) |
 
-### 15.4 Patch the workflows for Gov cloud
+### 15.4 GitHub Actions repository variables (tfvars content)
+
+`infra/envs/<env>.tfvars` files are **gitignored** (see [.gitignore](../.gitignore) line 37: `*.tfvars`). CI cannot read a file that isn't in the repo, so the workflows reconstruct each tfvars file from a repo-scoped GitHub Variable before running `terraform plan` / `terraform destroy`:
+
+| Variable | Value |
+| --- | --- |
+| `TFVARS_DEV` | Full contents of [infra/envs/dev.tfvars](../infra/envs/dev.tfvars) (paste as plain text). |
+| `TFVARS_PROD` | Full contents of [infra/envs/prod.tfvars](../infra/envs/prod.tfvars) (paste as plain text). |
+
+The "Write tfvars from GitHub Variables" step in [.github/workflows/terraform.yml](../.github/workflows/terraform.yml) and [.github/workflows/terraform-destroy.yml](../.github/workflows/terraform-destroy.yml) writes the variable content to `infra/envs/${WORKSPACE}.tfvars` and registers it as a log mask so any value the operator considers sensitive does not leak into the workflow log. The workflow fails fast with a clear error if the variable is empty.
+
+**How to update tfvars:**
+
+1. Edit the file locally (`infra/envs/dev.tfvars` or `prod.tfvars`).
+2. Validate locally: `cd infra && terraform plan -var-file=envs/dev.tfvars` (uses your local backend init).
+3. Copy the entire file contents into the GitHub repo variable of the same name (Settings → Secrets and variables → Actions → Variables → `TFVARS_DEV` or `TFVARS_PROD` → "Update").
+4. Trigger the `terraform` workflow (push to a branch + open PR for the plan, or `workflow_dispatch` for an out-of-cycle run).
+
+> The local tfvars file and the GitHub Variable are **two copies of the same data** — there is no automatic sync. If you change one and forget the other, CI will plan against stale inputs and local runs will diverge from CI. A short pre-deploy checklist habit is the cheapest mitigation; a `pre-commit` hook that fails when the file is staged-but-not-pushed-to-vars is the next step if mismatches become a recurring issue.
+
+> The variable content is read by CI but **never written back into the repo** — the destroy workflow uses the same mechanism so destroy-on-stale-state cannot happen. If the variable is unset, both workflows hard-fail before any Azure call.
+
+If you treat any value in tfvars as sensitive (e.g. an `alert_webhook_url`), store it as a **GitHub Secret** instead and reference it as `${{ secrets.TFVARS_DEV }}` in the workflow `env:` block. The current implementation pulls from `vars.*` because the canonical tfvars contents (env name, SKUs, region, deployment names) are non-sensitive; flip to `secrets.*` if your threat model differs.
+
+### 15.5 Patch the workflows for Gov cloud
 
 The current workflows target the public cloud. For Azure Government, add the cloud parameter to the `azure/login@v2` steps and to the `azurerm` provider block:
 

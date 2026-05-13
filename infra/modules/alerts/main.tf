@@ -12,9 +12,13 @@
 # ---------------------------------------------------------------------------
 
 locals {
-  alerts_enabled    = length(var.alert_email_recipients) > 0
-  alerts_action_id  = local.alerts_enabled ? azurerm_monitor_action_group.platform_ops[0].id : ""
-  monitor_kv_alerts = local.alerts_enabled && var.key_vault_id != null
+  alerts_enabled   = length(var.alert_email_recipients) > 0
+  alerts_action_id = local.alerts_enabled ? azurerm_monitor_action_group.platform_ops[0].id : ""
+  # Gate the per-secret expiry alerts on alerts_enabled only. The caller is
+  # responsible for passing a non-null key_vault_id and a non-empty
+  # tracked_secrets list when alerts are enabled; if tracked_secrets is empty
+  # the for_each below iterates zero times, so no resources are created.
+  monitor_kv_alerts = local.alerts_enabled
 }
 
 resource "azurerm_monitor_action_group" "platform_ops" {
@@ -78,7 +82,7 @@ resource "azurerm_monitor_metric_alert" "kv_secret_expiry" {
 # ---- 2. Function App failure rate ------------------------------------------
 
 resource "azurerm_monitor_metric_alert" "function_failure_rate" {
-  count = (local.alerts_enabled && var.function_app_id != null) ? 1 : 0
+  count = local.alerts_enabled ? 1 : 0
 
   name                = "function-failure-rate"
   resource_group_name = var.resource_group_name
@@ -105,7 +109,7 @@ resource "azurerm_monitor_metric_alert" "function_failure_rate" {
 # ---- 3. ADF pipeline failure (scheduled query over LA) ---------------------
 
 resource "azurerm_monitor_scheduled_query_rules_alert_v2" "adf_pipeline_failure" {
-  count = (local.alerts_enabled && var.data_factory_id != null) ? 1 : 0
+  count = local.alerts_enabled ? 1 : 0
 
   name                 = "adf-pipeline-failure"
   resource_group_name  = var.resource_group_name
@@ -137,7 +141,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "adf_pipeline_failure"
 # ---- 4. Foundry embedding deployment 429s ----------------------------------
 
 resource "azurerm_monitor_scheduled_query_rules_alert_v2" "embedding_throttle" {
-  count = (local.alerts_enabled && var.foundry_account_id != null) ? 1 : 0
+  count = local.alerts_enabled ? 1 : 0
 
   name                 = "embedding-throttle"
   resource_group_name  = var.resource_group_name

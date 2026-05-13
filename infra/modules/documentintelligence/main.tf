@@ -14,8 +14,14 @@ resource "azurerm_cognitive_account" "this" {
   kind     = "FormRecognizer"
   sku_name = "S0"
 
-  custom_subdomain_name         = var.account_name
-  public_network_access_enabled = true
+  custom_subdomain_name = var.account_name
+  # Navy NIST 800-53 Custom Policy "Azure AI Services resources should restrict
+  # network access" denies AI-service resources where publicNetworkAccess is
+  # not "Disabled" AND no ipRules are configured. Disabling public access
+  # entirely is the recommended path for Gov tenants. Runtime callers must
+  # reach this account over a Private Endpoint (PE module is a follow-up
+  # tracked in docs/DEPLOYMENT.md).
+  public_network_access_enabled = false
   local_auth_enabled            = false
 
   identity {
