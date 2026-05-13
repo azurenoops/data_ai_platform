@@ -19,9 +19,15 @@
   </ItemGroup>
 
   <ItemGroup Label="Microsoft.Extensions.AI">
+    <!--
+      Abstractions bumped to 9.7.1 (stable) because ModelContextProtocol.Core 0.3.0-preview.3
+      transitively requires Microsoft.Extensions.AI.Abstractions >= 9.7.1. The 9.1.0-preview
+      builds of Microsoft.Extensions.AI and .AI.OpenAI use a floor pin (>=) on Abstractions,
+      so the higher Abstractions version still satisfies them without forcing a 10.x jump.
+    -->
     <PackageVersion Include="Microsoft.Extensions.AI" Version="9.1.0-preview.1.25064.3" />
     <PackageVersion Include="Microsoft.Extensions.AI.OpenAI" Version="9.1.0-preview.1.25064.3" />
-    <PackageVersion Include="Microsoft.Extensions.AI.Abstractions" Version="9.1.0-preview.1.25064.3" />
+    <PackageVersion Include="Microsoft.Extensions.AI.Abstractions" Version="9.7.1" />
   </ItemGroup>
 
   <ItemGroup Label="Model Context Protocol">
@@ -34,16 +40,24 @@
   </ItemGroup>
 
   <ItemGroup Label="ASP.NET Core / Hosting">
-    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.0" />
-    <PackageVersion Include="Microsoft.Identity.Web" Version="3.5.1" />
-    <PackageVersion Include="Microsoft.Extensions.Configuration" Version="9.0.0" />
-    <PackageVersion Include="Microsoft.Extensions.Configuration.Binder" Version="9.0.0" />
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="9.0.0" />
-    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="9.0.0" />
-    <PackageVersion Include="Microsoft.Extensions.Http" Version="9.0.0" />
-    <PackageVersion Include="Microsoft.Extensions.Logging" Version="9.0.0" />
-    <PackageVersion Include="Microsoft.Extensions.Options" Version="9.0.0" />
-    <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="9.0.0" />
+    <!--
+      Microsoft.Identity.Web 3.5.1 is not published to nuget.org (NU1603); 3.6.0 has
+      CVE-2025-32016 / GHSA-rpq8-q44m-2rpg. 3.8.2 is the minimum patched release.
+      Microsoft.Extensions.* bumped to 9.0.5 because ModelContextProtocol transitively
+      requires Microsoft.Extensions.Hosting.Abstractions 9.0.5 (which forces siblings
+      such as Microsoft.Extensions.Options >= 9.0.5). All siblings are moved together
+      to keep the family aligned and avoid cascading downgrade errors.
+    -->
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.5" />
+    <PackageVersion Include="Microsoft.Identity.Web" Version="3.8.2" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration" Version="9.0.5" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Binder" Version="9.0.5" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="9.0.5" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="9.0.5" />
+    <PackageVersion Include="Microsoft.Extensions.Http" Version="9.0.5" />
+    <PackageVersion Include="Microsoft.Extensions.Logging" Version="9.0.5" />
+    <PackageVersion Include="Microsoft.Extensions.Options" Version="9.0.5" />
+    <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="9.0.5" />
   </ItemGroup>
 
   <ItemGroup Label="Azure Functions">
@@ -79,7 +93,7 @@
     <PackageVersion Include="xunit" Version="2.9.2" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="2.8.2" />
     <PackageVersion Include="coverlet.collector" Version="6.0.2" />
-    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="9.0.0" />
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="9.0.5" />
     <PackageVersion Include="FluentAssertions" Version="6.12.2" />
     <PackageVersion Include="NSubstitute" Version="5.3.0" />
     <PackageVersion Include="WireMock.Net" Version="1.6.7" />
@@ -87,7 +101,8 @@
   </ItemGroup>
 
   <ItemGroup Label="Misc">
-    <PackageVersion Include="System.Text.Json" Version="9.0.0" />
+    <!-- System.Text.Json bumped to 9.0.5 (>= 9.0.1 required by Microsoft.Extensions.AI 9.1.0-preview). -->
+    <PackageVersion Include="System.Text.Json" Version="9.0.5" />
     <PackageVersion Include="Polly" Version="8.5.0" />
     <PackageVersion Include="Microsoft.SourceLink.GitHub" Version="8.0.0" />
   </ItemGroup>
