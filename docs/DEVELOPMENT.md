@@ -914,7 +914,7 @@ public sealed class MyToolTests : IClassFixture<McpServerFactory>
 
 ### 16.5 Smoke tests
 
-[DataAiMcp.Smoke.Tests](../tests/DataAiMcp.Smoke.Tests) are run by [infra/scripts/postdeploy.sh](../infra/scripts/postdeploy.sh) after `az webapp deploy`. They:
+[DataAiMcp.Smoke.Tests](../tests/DataAiMcp.Smoke.Tests) are run by [infra/scripts/postdeploy.sh](../infra/scripts/postdeploy.sh) after the run-from-package deployment steps complete. They:
 
 - Hit `/healthz`.
 - Optionally exercise `tools/list` and one `search_documents` call.
@@ -927,7 +927,7 @@ Extend smoke tests when adding a tool that has end-to-end side effects.
 
 ### 17.1 Branch strategy
 
-- `main` is always deployable — `cd infra && terraform apply -var-file=envs/prod.tfvars` followed by the `cd.yml` zip deploys should succeed against a fresh subscription from `main`.
+- `main` is always deployable — `cd infra && terraform apply -var-file=envs/prod.tfvars` followed by the run-from-package deployment steps in [terraform.yml](../.github/workflows/terraform.yml) should succeed against a fresh subscription from `main`.
 - Feature branches: `feature/<short-description>` or `fix/<short-description>`.
 - Long-lived environment branches are not used; environments are differentiated by `azd` env name + parameter overrides.
 
@@ -967,13 +967,13 @@ On every push and PR:
 3. `dotnet test -c Release --no-build`.
 4. `terraform fmt -check -recursive`, `terraform validate`, and `tflint --recursive` for `infra/`.
 
-### 18.2 CD ([.github/workflows/cd.yml](../.github/workflows/cd.yml))
+### 18.2 Deploy ([.github/workflows/terraform.yml](../.github/workflows/terraform.yml))
 
 OIDC-federated against the deployment subscription:
 
 1. `azure/login@v2` (must use `environment: AzureUSGovernment` for Gov).
 2. `terraform apply -var-file=envs/<env>.tfvars`.
-3. The §11 zip-deploy steps (or let the `cd.yml` workflow run automatically).
+3. The §11 package-upload + `WEBSITE_RUN_FROM_PACKAGE` steps (or let the deploy job inside `terraform.yml` run automatically).
 
 When changing the workflow, test against a non-production environment first. The OIDC trust relationship requires the federated credential subject claim to match `repo:<org>/<repo>:environment:<env-name>` — adding a new environment requires a new federated credential.
 

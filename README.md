@@ -135,7 +135,7 @@ The full posture, decisions, and pitfalls are documented in [docs/README.md](doc
 | Data Factory pipeline JSON | [infra/datafactory/pipelines/](infra/datafactory/pipelines) |
 | Post-provision / post-deploy hooks | [infra/scripts/](infra/scripts) |
 | GitHub Actions — Terraform plan/apply | [.github/workflows/terraform.yml](.github/workflows/terraform.yml) |
-| GitHub Actions — app zip deploy | [.github/workflows/cd.yml](.github/workflows/cd.yml) |
+| GitHub Actions — app deploy (run-from-package URL) | [.github/workflows/terraform.yml](.github/workflows/terraform.yml) |
 | Test projects | [tests/](tests) |
 
 ---

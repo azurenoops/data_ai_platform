@@ -325,6 +325,8 @@ jobs:
           echo "RESOURCE_GROUP=$(jq -r '.AZURE_RESOURCE_GROUP.value' infra/tfout.json)" >> "$GITHUB_ENV"
           echo "APP_SERVICE_NAME=$(jq -r '.APP_SERVICE_NAME.value' infra/tfout.json)" >> "$GITHUB_ENV"
           echo "FUNCTION_APP_NAME=$(jq -r '.FUNCTION_APP_NAME.value' infra/tfout.json)" >> "$GITHUB_ENV"
+          echo "STORAGE_ACCOUNT_NAME=$(jq -r '.STORAGE_ACCOUNT_NAME.value' infra/tfout.json)" >> "$GITHUB_ENV"
+          echo "STORAGE_BLOB_ENDPOINT=$(jq -r '.STORAGE_BLOB_ENDPOINT.value' infra/tfout.json)" >> "$GITHUB_ENV"
           echo "MCP_SERVER_BASE_URL=$(jq -r '.MCP_SERVER_BASE_URL.value' infra/tfout.json)" >> "$GITHUB_ENV"
 
       - name: Build & publish MCP server
@@ -343,21 +345,98 @@ jobs:
             /p:UseAppHost=false
           (cd publish/functions && zip -qr ../functions.zip .)
 
-      - name: Deploy MCP server (App Service)
+      # Kudu/SCM zip deploy is unreachable when public network access is disabled.
+      # Publish each package to Storage and point WEBSITE_RUN_FROM_PACKAGE at a
+      # signed blob URL so the app runtime fetches the package directly.
+      - name: Upload packages and configure run-from-package URLs
         run: |
-          az webapp deploy \
+          set -euo pipefail
+
+          EXPIRY_UTC="$(date -u -d '+30 days' '+%Y-%m-%dT%H:%MZ')"
+          MCP_BLOB_NAME="mcp-server-${GITHUB_SHA}.zip"
+          FUNC_BLOB_NAME="functions-${GITHUB_SHA}.zip"
+
+          MCP_UPLOAD_SAS="$(az storage blob generate-sas \
+            --account-name "${STORAGE_ACCOUNT_NAME}" \
+            --container-name deploy \
+            --name "${MCP_BLOB_NAME}" \
+            --permissions acw \
+            --expiry "${EXPIRY_UTC}" \
+            --https-only \
+            --as-user \
+            --auth-mode login \
+            -o tsv)"
+
+          FUNC_UPLOAD_SAS="$(az storage blob generate-sas \
+            --account-name "${STORAGE_ACCOUNT_NAME}" \
+            --container-name deploy \
+            --name "${FUNC_BLOB_NAME}" \
+            --permissions acw \
+            --expiry "${EXPIRY_UTC}" \
+            --https-only \
+            --as-user \
+            --auth-mode login \
+            -o tsv)"
+
+          az storage blob upload \
+            --account-name "${STORAGE_ACCOUNT_NAME}" \
+            --container-name deploy \
+            --name "${MCP_BLOB_NAME}" \
+            --file publish/mcp-server.zip \
+            --sas-token "${MCP_UPLOAD_SAS}" \
+            --overwrite true
+
+          az storage blob upload \
+            --account-name "${STORAGE_ACCOUNT_NAME}" \
+            --container-name deploy \
+            --name "${FUNC_BLOB_NAME}" \
+            --file publish/functions.zip \
+            --sas-token "${FUNC_UPLOAD_SAS}" \
+            --overwrite true
+
+          MCP_READ_SAS="$(az storage blob generate-sas \
+            --account-name "${STORAGE_ACCOUNT_NAME}" \
+            --container-name deploy \
+            --name "${MCP_BLOB_NAME}" \
+            --permissions r \
+            --expiry "${EXPIRY_UTC}" \
+            --https-only \
+            --as-user \
+            --auth-mode login \
+            -o tsv)"
+
+          FUNC_READ_SAS="$(az storage blob generate-sas \
+            --account-name "${STORAGE_ACCOUNT_NAME}" \
+            --container-name deploy \
+            --name "${FUNC_BLOB_NAME}" \
+            --permissions r \
+            --expiry "${EXPIRY_UTC}" \
+            --https-only \
+            --as-user \
+            --auth-mode login \
+            -o tsv)"
+
+          MCP_PACKAGE_URL="${STORAGE_BLOB_ENDPOINT}deploy/${MCP_BLOB_NAME}?${MCP_READ_SAS}"
+          FUNC_PACKAGE_URL="${STORAGE_BLOB_ENDPOINT}deploy/${FUNC_BLOB_NAME}?${FUNC_READ_SAS}"
+
+          az webapp config appsettings set \
             --resource-group "${RESOURCE_GROUP}" \
             --name "${APP_SERVICE_NAME}" \
-            --type zip \
-            --src-path publish/mcp-server.zip \
-            --restart true
+            --settings WEBSITE_RUN_FROM_PACKAGE="${MCP_PACKAGE_URL}"
 
-      - name: Deploy ingestion functions (FlexConsumption)
-        run: |
-          az functionapp deployment source config-zip \
+          az functionapp config appsettings set \
             --resource-group "${RESOURCE_GROUP}" \
             --name "${FUNCTION_APP_NAME}" \
-            --src publish/functions.zip
+            --settings WEBSITE_RUN_FROM_PACKAGE="${FUNC_PACKAGE_URL}"
+
+          # Force restart so both runtimes pick up the new package URL now.
+          az webapp restart \
+            --resource-group "${RESOURCE_GROUP}" \
+            --name "${APP_SERVICE_NAME}"
+
+          az functionapp restart \
+            --resource-group "${RESOURCE_GROUP}" \
+            --name "${FUNCTION_APP_NAME}"
 
       - name: Run postdeploy smoke
         env:

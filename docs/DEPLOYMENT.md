@@ -14,10 +14,10 @@ This guide is intentionally exhaustive. Read it through once before running any 
 > | --- | --- |
 > | `azd env new <name>` + `azd env set` | `terraform workspace new <env>` + edit [infra/envs/dev.tfvars](../infra/envs/dev.tfvars) / [infra/envs/prod.tfvars](../infra/envs/prod.tfvars) |
 > | `azd provision` | One-time `cd infra/bootstrap && terraform init && terraform apply` (creates remote state SA), then `cd infra && terraform init -backend-config=…  && terraform apply -var-file=envs/<env>.tfvars` |
-> | `azd deploy` | `dotnet publish` → `az webapp deploy` (MCP server) and `az functionapp deployment source config-zip` (ingestion functions). The CI workflow [.github/workflows/cd.yml](../.github/workflows/cd.yml) does this automatically after a successful Terraform apply. |
+> | `azd deploy` | `dotnet publish` → upload ZIPs to the platform storage `deploy` container → set `WEBSITE_RUN_FROM_PACKAGE` URL on App Service and Function App. The CI workflow [.github/workflows/terraform.yml](../.github/workflows/terraform.yml) does this automatically after a successful Terraform apply. |
 > | `terraform -chdir=infra output -json` | `terraform -chdir=infra output -json > tfout.json` |
 > | `infra/main.bicep` + `infra/modules/*.bicep` | [infra/main.tf](../infra/main.tf), [infra/primary.tf](../infra/primary.tf), [infra/secondary.tf](../infra/secondary.tf), [infra/frontdoor.tf](../infra/frontdoor.tf), [infra/roles.tf](../infra/roles.tf), [infra/outputs.tf](../infra/outputs.tf), and `infra/modules/<name>/*.tf` |
-> | `.github/workflows/terraform.yml` | (deleted — replaced by GitHub Actions workflows [.github/workflows/terraform.yml](../.github/workflows/terraform.yml) + [.github/workflows/cd.yml](../.github/workflows/cd.yml)) |
+> | `.github/workflows/terraform.yml` | Active workflow for terraform validate/plan/apply and application deployment. |
 >
 > **Required GitHub Actions configuration:**
 >
@@ -634,14 +634,17 @@ az webapp config appsettings set -n "$APP" -g "$RG" --settings \
 
 ## 11. Deploy application code
 
-There is no `azd deploy` step. Application code is deployed with `dotnet publish` + Azure CLI zip-deploy. The CI workflow [.github/workflows/cd.yml](../.github/workflows/cd.yml) does this automatically after the `terraform.yml` workflow has applied; the manual procedure is below for local / break-glass use.
+There is no `azd deploy` step. Application code is deployed with `dotnet publish`, blob upload to the platform storage `deploy` container, and `WEBSITE_RUN_FROM_PACKAGE` app-setting updates (no Kudu dependency). The CI workflow [.github/workflows/terraform.yml](../.github/workflows/terraform.yml) does this automatically after apply; the manual procedure is below for local / break-glass use.
 
-### 11.1 MCP server (App Service)
+### 11.1 Build and upload packages
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
 RG="$(terraform -chdir=infra output -raw AZURE_RESOURCE_GROUP)"
 APP="$(terraform -chdir=infra output -raw APP_SERVICE_NAME)"
+FN="$(terraform -chdir=infra output -raw FUNCTION_APP_NAME)"
+STORAGE_ACCOUNT="$(terraform -chdir=infra output -raw STORAGE_ACCOUNT_NAME)"
+STORAGE_BLOB_ENDPOINT="$(terraform -chdir=infra output -raw STORAGE_BLOB_ENDPOINT)"
 
 dotnet publish src/DataAiMcp.McpServer/DataAiMcp.McpServer.csproj \
   --configuration Release \
@@ -649,34 +652,100 @@ dotnet publish src/DataAiMcp.McpServer/DataAiMcp.McpServer.csproj \
   /p:UseAppHost=false
 (cd publish/mcp-server && zip -qr ../mcp-server.zip .)
 
-az webapp deploy \
-  --resource-group "$RG" \
-  --name "$APP" \
-  --type zip \
-  --src-path publish/mcp-server.zip \
-  --restart true
-```
-
-### 11.2 Ingestion Functions (Flex Consumption)
-
-```bash
-FN="$(terraform -chdir=infra output -raw FUNCTION_APP_NAME)"
-
 dotnet publish src/DataAiMcp.Ingestion.Functions/DataAiMcp.Ingestion.Functions.csproj \
   --configuration Release \
   --output publish/functions \
   /p:UseAppHost=false
 (cd publish/functions && zip -qr ../functions.zip .)
 
-az functionapp deployment source config-zip \
+EXPIRY_UTC="$(date -u -d '+30 days' '+%Y-%m-%dT%H:%MZ')"
+MCP_BLOB_NAME="mcp-server-$(date -u +%Y%m%d%H%M%S).zip"
+FUNC_BLOB_NAME="functions-$(date -u +%Y%m%d%H%M%S).zip"
+
+MCP_UPLOAD_SAS="$(az storage blob generate-sas \
+  --account-name "$STORAGE_ACCOUNT" \
+  --container-name deploy \
+  --name "$MCP_BLOB_NAME" \
+  --permissions acw \
+  --expiry "$EXPIRY_UTC" \
+  --https-only \
+  --as-user \
+  --auth-mode login -o tsv)"
+
+FUNC_UPLOAD_SAS="$(az storage blob generate-sas \
+  --account-name "$STORAGE_ACCOUNT" \
+  --container-name deploy \
+  --name "$FUNC_BLOB_NAME" \
+  --permissions acw \
+  --expiry "$EXPIRY_UTC" \
+  --https-only \
+  --as-user \
+  --auth-mode login -o tsv)"
+
+az storage blob upload \
+  --account-name "$STORAGE_ACCOUNT" \
+  --container-name deploy \
+  --name "$MCP_BLOB_NAME" \
+  --file publish/mcp-server.zip \
+  --sas-token "$MCP_UPLOAD_SAS" \
+  --overwrite true
+
+az storage blob upload \
+  --account-name "$STORAGE_ACCOUNT" \
+  --container-name deploy \
+  --name "$FUNC_BLOB_NAME" \
+  --file publish/functions.zip \
+  --sas-token "$FUNC_UPLOAD_SAS" \
+  --overwrite true
+
+MCP_READ_SAS="$(az storage blob generate-sas \
+  --account-name "$STORAGE_ACCOUNT" \
+  --container-name deploy \
+  --name "$MCP_BLOB_NAME" \
+  --permissions r \
+  --expiry "$EXPIRY_UTC" \
+  --https-only \
+  --as-user \
+  --auth-mode login -o tsv)"
+
+FUNC_READ_SAS="$(az storage blob generate-sas \
+  --account-name "$STORAGE_ACCOUNT" \
+  --container-name deploy \
+  --name "$FUNC_BLOB_NAME" \
+  --permissions r \
+  --expiry "$EXPIRY_UTC" \
+  --https-only \
+  --as-user \
+  --auth-mode login -o tsv)"
+
+MCP_PACKAGE_URL="${STORAGE_BLOB_ENDPOINT}deploy/${MCP_BLOB_NAME}?${MCP_READ_SAS}"
+FUNC_PACKAGE_URL="${STORAGE_BLOB_ENDPOINT}deploy/${FUNC_BLOB_NAME}?${FUNC_READ_SAS}"
+```
+
+### 11.2 Configure run-from-package URLs
+
+```bash
+az webapp config appsettings set \
+  --resource-group "$RG" \
+  --name "$APP" \
+  --settings WEBSITE_RUN_FROM_PACKAGE="$MCP_PACKAGE_URL"
+
+az functionapp config appsettings set \
   --resource-group "$RG" \
   --name "$FN" \
-  --src publish/functions.zip
+  --settings WEBSITE_RUN_FROM_PACKAGE="$FUNC_PACKAGE_URL"
+
+az webapp restart --resource-group "$RG" --name "$APP"
+az functionapp restart --resource-group "$RG" --name "$FN"
 ```
+
+### 11.3 Ingestion Functions (notes)
+
+Kudu zip deploy (`az functionapp deployment source config-zip`) is intentionally not used because both apps run with public network access disabled.
 
 Cold-start latency on the first request is normal; subsequent requests warm up.
 
-### 11.3 Run the post-deploy smoke
+### 11.4 Run the post-deploy smoke
 
 ```bash
 terraform -chdir=infra output -json > infra/tfout.json
@@ -798,7 +867,7 @@ See [§12.3](#123-sample-client-end-to-end). Use this as the reference for any c
 
 ## 15. CI/CD with GitHub Actions
 
-The repo ships three Terraform-aware workflows: [`ci.yml`](../.github/workflows/ci.yml) (build, test, terraform fmt/validate, tflint), [`terraform.yml`](../.github/workflows/terraform.yml) (plan on PR, apply on main with environment approval), and [`cd.yml`](../.github/workflows/cd.yml) (app-only zip deploy after terraform apply succeeds). To use them with Azure Government:
+The repo ships two Terraform-aware workflows: [`ci.yml`](../.github/workflows/ci.yml) (build, test, terraform fmt/validate, tflint) and [`terraform.yml`](../.github/workflows/terraform.yml) (plan on PR, apply on main with environment approval, then app deployment via run-from-package URL). To use them with Azure Government:
 
 ### 15.1 Federated credential
 
@@ -808,7 +877,7 @@ In the **Flank Speed Entra tenant**, register an app registration for GitHub Act
 repo:<org>/<repo>:environment:<env-name>
 ```
 
-For each environment you target (`dev`, `prod`). Both `terraform.yml` (apply job) and `cd.yml` (deploy job) gate on the corresponding GitHub `environment:` so reviewers can require approvals before changes hit Azure.
+For each environment you target (`dev`, `prod`). `terraform.yml` gates apply and deploy on the corresponding GitHub `environment:` so reviewers can require approvals before changes hit Azure.
 
 ### 15.2 GitHub Actions secrets
 
@@ -859,7 +928,7 @@ If you treat any value in tfvars as sensitive (e.g. an `alert_webhook_url`), sto
 The current workflows target the public cloud. For Azure Government, add the cloud parameter to the `azure/login@v2` steps and to the `azurerm` provider block:
 
 ```yaml
-# .github/workflows/terraform.yml AND cd.yml — every azure/login step
+# .github/workflows/terraform.yml — every azure/login step
 - name: Azure login (OIDC)
   uses: azure/login@v2
   with:
@@ -964,7 +1033,7 @@ Only required if you change the embedding model or its dimension. Procedure:
 | Sample client: `AADSTS50020` "user account does not exist in tenant" | Mixed-cloud auth — credentials cached for commercial cloud. | `az logout`, run [§6](#6-authenticate-to-azure-government), retry. |
 | `query_structured_data` fails with `model not found` | `chatDeployment` parameter doesn't match an actual deployment in Foundry. | Confirm with `az cognitiveservices account deployment list ...` and reconcile. |
 | `query_structured_data` fails with `Login failed for user` against Synapse | Synapse AAD admin not set, or principal not granted. | Confirm `principal_id` was set in your tfvars; re-run `terraform apply -var-file=envs/<env>.tfvars`. |
-| `az webapp deploy` succeeds but App Service immediately crash-loops | Missing app setting (race after Terraform update). | `az webapp config appsettings list -n $APP -g $RG`. Compare against [infra/primary.tf](../infra/primary.tf). Re-run `terraform apply -var-file=envs/<env>.tfvars` then re-run §11 deploy steps. |
+| App Service restarts but serves old or broken code after deploy | Package URL missing/expired or app settings drift. | `az webapp config appsettings list -n $APP -g $RG --query "[?name=='WEBSITE_RUN_FROM_PACKAGE']"` and verify the URL is reachable; then re-run §11 deploy steps to upload a new package and refresh the URL. |
 | Foundry token cost alert fires unexpectedly | A user is asking very large `query_structured_data` questions. | Review App Insights traces for the `RagOrchestrator` and `SqlGenerator` source. Consider rate limits or per-user role gating. |
 | `terraform destroy` fails with "Key Vault has soft-deleted resources" | Previous deploy left soft-deleted resources blocking re-create. | `az keyvault purge --name <kv-name>` (after confirming no production data), then re-run `terraform destroy`. |
 
@@ -1085,7 +1154,7 @@ Use this checklist as the final gate before `terraform apply`. Print it, sign it
 | ATO posture decision (standalone / inheritance / type-authorize) | ISSO | ☐ | | |
 | Cost owner / cost center recorded | Program | ☐ | | |
 | On-call POC identified for live operation | Program | ☐ | | |
-| `cd.yml` patched for Gov cloud (if using GitHub Actions) | Engineer | ☐ | | |
+| `terraform.yml` patched for Gov cloud (if using GitHub Actions) | Engineer | ☐ | | |
 | Tear-down path rehearsed in non-production | Engineer | ☐ | | |
 
 Signed: _________________________  Date: _____________
