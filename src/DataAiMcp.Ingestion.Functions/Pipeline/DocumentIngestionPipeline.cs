@@ -1,3 +1,4 @@
+using System.ClientModel;
 using System.Text.Json;
 using Azure;
 using Azure.Search.Documents;
@@ -8,6 +9,7 @@ using DataAiMcp.Shared.Models;
 using DataAiMcp.Shared.Search;
 using DataAiMcp.Shared.Storage;
 using DataAiMcp.Shared.Telemetry;
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 
 namespace DataAiMcp.Ingestion.Functions.Pipeline;
@@ -79,11 +81,12 @@ public sealed class DocumentIngestionPipeline
                 cancellationToken: cancellationToken).ConfigureAwait(false);
         }
 
-        // 4) Embeddings (batched)
+        // 4) Embeddings (batched with throttling/backoff so large files do not exceed the
+        //    embedding deployment's per-minute token rate limit in a single request)
         var embedder = _foundry.CreateEmbeddingGenerator();
         var startTs = DateTimeOffset.UtcNow;
         var inputs = chunks.Select(c => c.Text).ToList();
-        var embeddings = await embedder.GenerateAsync(inputs, cancellationToken: cancellationToken).ConfigureAwait(false);
+        var embeddings = await GenerateEmbeddingsBatchedAsync(embedder, inputs, blobName, cancellationToken).ConfigureAwait(false);
         DataAiTelemetry.EmbeddingLatencyMs.Record((DateTimeOffset.UtcNow - startTs).TotalMilliseconds, new KeyValuePair<string, object?>("chunks", chunks.Count));
 
         // 5) Build IndexDocument batch
@@ -143,6 +146,62 @@ public sealed class DocumentIngestionPipeline
     {
         var first = path.Split('/', 2)[0];
         return string.IsNullOrEmpty(first) ? "unknown" : first;
+    }
+
+    // Chunks per embedding request. Kept conservative so a single batch stays well under the
+    // embedding deployment's per-minute token budget; larger files simply use more batches.
+    private const int EmbeddingBatchSize = 32;
+    private const int MaxEmbeddingRetries = 6;
+
+    private async Task<IReadOnlyList<Embedding<float>>> GenerateEmbeddingsBatchedAsync(
+        IEmbeddingGenerator<string, Embedding<float>> embedder,
+        List<string> inputs,
+        string blobName,
+        CancellationToken cancellationToken)
+    {
+        var results = new List<Embedding<float>>(inputs.Count);
+
+        for (var offset = 0; offset < inputs.Count; offset += EmbeddingBatchSize)
+        {
+            var batch = inputs.Skip(offset).Take(EmbeddingBatchSize).ToList();
+
+            for (var attempt = 1; ; attempt++)
+            {
+                try
+                {
+                    var batchEmbeddings = await embedder.GenerateAsync(batch, cancellationToken: cancellationToken).ConfigureAwait(false);
+                    results.AddRange(batchEmbeddings);
+                    break;
+                }
+                catch (ClientResultException ex) when (ex.Status == 429 && attempt <= MaxEmbeddingRetries)
+                {
+                    var delay = GetEmbeddingRetryDelay(ex, attempt);
+                    _logger.LogWarning(
+                        "Embedding batch for {Blob} throttled (429); attempt {Attempt}/{Max}, retrying in {Seconds}s.",
+                        blobName, attempt, MaxEmbeddingRetries, delay.TotalSeconds);
+                    await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+                }
+            }
+        }
+
+        return results;
+    }
+
+    private static TimeSpan GetEmbeddingRetryDelay(ClientResultException ex, int attempt)
+    {
+        // Honor the service-provided Retry-After header when present.
+        var response = ex.GetRawResponse();
+        if (response is not null &&
+            response.Headers.TryGetValue("retry-after", out var retryAfter) &&
+            int.TryParse(retryAfter, out var seconds) &&
+            seconds > 0)
+        {
+            return TimeSpan.FromSeconds(seconds);
+        }
+
+        // Otherwise exponential backoff capped at 60s.
+        var backoff = Math.Min(60, (int)Math.Pow(2, attempt) * 2);
+        return TimeSpan.FromSeconds(backoff);
     }
 
     private static string NormalizeDocumentId(string blobName)

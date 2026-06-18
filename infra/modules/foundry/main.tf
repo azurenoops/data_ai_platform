@@ -197,8 +197,11 @@ resource "azapi_resource" "deployment_embedding" {
       # text-embedding-3-large is not Standard-capable in every region
       # (for example Central US only exposes GlobalStandard/DataZoneStandard).
       # Use GlobalStandard, which is supported in East US, East US 2, and Central US.
-      name     = "GlobalStandard"
-      capacity = 30
+      name = "GlobalStandard"
+      # 150K TPM: ingestion embeds document chunks in batches; 30K TPM throttled
+      # large files (e.g. multi-hundred-KB spreadsheets) past the HTTP gateway
+      # timeout. 150 stays well within the regional 1000-unit quota for this model.
+      capacity = 150
     }
     properties = {
       model = {
