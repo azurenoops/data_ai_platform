@@ -32,26 +32,33 @@ public sealed class IngestBlobHttpFunction
     {
         try
         {
+            var failures = new List<string>();
+
             // Event Grid sends validation requests to the subscription endpoint
-            if (req.Headers.Contains("aeg-event-type") && 
+            if (req.Headers.Contains("aeg-event-type") &&
                 req.Headers.GetValues("aeg-event-type").First() == "SubscriptionValidation")
             {
                 _logger.LogInformation("Event Grid subscription validation request received.");
-                
+
                 using var reader = new StreamReader(req.Body);
                 var content = await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
                 var jsonElement = JsonSerializer.Deserialize<JsonElement>(content);
 
-                if (jsonElement.TryGetProperty("validationCode", out var codeElement))
+                if (jsonElement.ValueKind == JsonValueKind.Array &&
+                    jsonElement.GetArrayLength() > 0 &&
+                    jsonElement[0].TryGetProperty("data", out var dataElement) &&
+                    dataElement.TryGetProperty("validationCode", out var codeElement))
                 {
                     var validationCode = codeElement.GetString();
                     var response = req.CreateResponse();
                     response.StatusCode = System.Net.HttpStatusCode.OK;
-                    
+
                     var responseData = new { validationResponse = validationCode };
                     await response.WriteAsJsonAsync(responseData, cancellationToken).ConfigureAwait(false);
                     return response;
                 }
+
+                _logger.LogWarning("Event Grid subscription validation payload did not contain a validationCode.");
             }
 
             // Parse Event Grid events from request body
@@ -102,15 +109,22 @@ public sealed class IngestBlobHttpFunction
 
                         // Download and process blob
                         using var blobContent = await _lake.OpenReadAsync(StorageContainer.Landing, name, cancellationToken).ConfigureAwait(false);
-                        _logger.LogInformation("IngestBlobHttp ingesting {Blob} ({Bytes} bytes).", name, blobContent.Length);
+                        _logger.LogInformation("IngestBlobHttp ingesting {Blob}.", name);
                         await _pipeline.IngestAsync(name, blobContent, blobMetadata: null, cancellationToken).ConfigureAwait(false);
                     }
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Error processing event.");
-                    // Continue processing other events
+                    failures.Add(ex.ToString());
                 }
+            }
+
+            if (failures.Count > 0)
+            {
+                var errorResponse = req.CreateResponse(System.Net.HttpStatusCode.InternalServerError);
+                await errorResponse.WriteAsJsonAsync(new { errors = failures }, cancellationToken).ConfigureAwait(false);
+                return errorResponse;
             }
 
             var okResponse = req.CreateResponse();

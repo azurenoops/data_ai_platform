@@ -69,7 +69,7 @@ public sealed class IngestBlobFunction
 
             // Download blob to stream
             using var content = await _lake.OpenReadAsync(StorageContainer.Landing, name, cancellationToken).ConfigureAwait(false);
-            _logger.LogInformation("IngestBlob ingesting {Blob} ({Bytes} bytes).", name, content.Length);
+            _logger.LogInformation("IngestBlob ingesting {Blob}.", name);
             await _pipeline.IngestAsync(name, content, blobMetadata: null, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)

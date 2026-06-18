@@ -151,7 +151,7 @@ public sealed class DocumentIngestionPipeline
         for (var i = 0; i < blobName.Length; i++)
         {
             var ch = blobName[i];
-            buf[i] = char.IsLetterOrDigit(ch) || ch is '-' or '_' or '.' ? ch : '_';
+            buf[i] = char.IsLetterOrDigit(ch) || ch is '-' or '_' ? ch : '_';
         }
         return new string(buf).TrimStart('_');
     }
