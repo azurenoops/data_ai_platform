@@ -46,11 +46,35 @@ builder.Services.AddSingleton<CallerSecurityContext>();
 var authOptions = builder.Configuration.GetSection(McpAuthOptions.SectionName).Get<McpAuthOptions>() ?? new McpAuthOptions();
 if (authOptions.RequireAuthenticatedUser)
 {
+    var trimmedAudience = authOptions.Audience?.Trim() ?? string.Empty;
+    var audienceSuffix = trimmedAudience.StartsWith("api://", StringComparison.OrdinalIgnoreCase)
+        ? trimmedAudience.Substring("api://".Length)
+        : trimmedAudience;
+    var validAudiences = new List<string>();
+    if (!string.IsNullOrWhiteSpace(trimmedAudience))
+    {
+        validAudiences.Add(trimmedAudience);
+    }
+    if (Guid.TryParse(audienceSuffix, out _))
+    {
+        validAudiences.Add(audienceSuffix);
+        validAudiences.Add($"api://{audienceSuffix}");
+    }
+
+    var validIssuers = new List<string>
+    {
+        $"https://login.microsoftonline.com/{authOptions.TenantId}/v2.0",
+        $"https://sts.windows.net/{authOptions.TenantId}/",
+    };
+
     builder.Services
         .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         .AddJwtBearer(options =>
         {
-            options.Authority = $"https://login.microsoftonline.com/{authOptions.TenantId}/v2.0";
+            // Use the v1 (tenant-root) authority so OIDC discovery returns the v1 issuer
+            // (https://sts.windows.net/{tid}/) which is what managed-identity tokens carry.
+            // ValidIssuers below also accepts v2.0 tokens for forward compatibility.
+            options.Authority = $"https://login.microsoftonline.com/{authOptions.TenantId}";
             options.Audience = authOptions.Audience;
             options.TokenValidationParameters = new TokenValidationParameters
             {
@@ -59,6 +83,8 @@ if (authOptions.RequireAuthenticatedUser)
                 ValidateLifetime = true,
                 ValidateIssuerSigningKey = true,
                 ClockSkew = TimeSpan.FromMinutes(2),
+                ValidIssuers = validIssuers,
+                ValidAudiences = validAudiences,
             };
         });
 

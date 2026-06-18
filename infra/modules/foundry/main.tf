@@ -21,14 +21,19 @@ locals {
   storage_name = data.azurerm_storage_account.datalake.name
   dfs_endpoint = data.azurerm_storage_account.datalake.primary_dfs_endpoint
 
-  identity_block = local.cmk_enabled ? {
-    type = "SystemAssigned,UserAssigned"
-    userAssignedIdentities = {
-      (var.cmk_user_assigned_identity_id) = {}
-    }
-    } : {
-    type = "SystemAssigned"
-  }
+  # Build the identity payload with merge() so the disabled-CMK case sends only
+  # { type = "SystemAssigned" } (no userAssignedIdentities key), exactly as the
+  # original code did, while keeping a single consistent object type for the
+  # azapi body. A conditional expression can't be used directly here because
+  # Terraform type-checks both branches and the shapes differ.
+  identity_block = merge(
+    { type = local.cmk_enabled ? "SystemAssigned,UserAssigned" : "SystemAssigned" },
+    local.cmk_enabled ? {
+      userAssignedIdentities = {
+        (var.cmk_user_assigned_identity_id) = {}
+      }
+    } : {},
+  )
 
   encryption_block = local.cmk_enabled ? {
     keySource = "Microsoft.KeyVault"
@@ -189,7 +194,10 @@ resource "azapi_resource" "deployment_embedding" {
 
   body = {
     sku = {
-      name     = "Standard"
+      # text-embedding-3-large is not Standard-capable in every region
+      # (for example Central US only exposes GlobalStandard/DataZoneStandard).
+      # Use GlobalStandard, which is supported in East US, East US 2, and Central US.
+      name     = "GlobalStandard"
       capacity = 30
     }
     properties = {

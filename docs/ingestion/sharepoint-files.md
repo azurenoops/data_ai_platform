@@ -17,9 +17,9 @@ SharePoint site (Online)
     └── Document library (drive)
             │  Graph: GET /drives/{driveId}/root/children
             ▼
-    SharePointFilesFunction (Timer, default every 30 min)
+        DispatcherFunction (Timer, default every 6 hours)
             │
-            ├─ for each drive in SharePoint:DriveIds
+          ├─ for each enabled SharePoint source in Cosmos source-configurations
             ├─ list items via GraphFileFetcher
             ├─ resolve per-item permissions → securityIds
             └─ download → upload to landing/sharepoint/<drive>/<path>
@@ -38,7 +38,7 @@ SharePoint site (Online)
 ```
 
 Code:
-- [`src/DataAiMcp.Ingestion.Functions/SharePointFilesFunction.cs`](../../src/DataAiMcp.Ingestion.Functions/SharePointFilesFunction.cs)
+- [`src/DataAiMcp.Ingestion.Functions/DispatcherFunction.cs`](../../src/DataAiMcp.Ingestion.Functions/DispatcherFunction.cs)
 - [`src/DataAiMcp.Ingestion.Functions/Graph/GraphFileFetcher.cs`](../../src/DataAiMcp.Ingestion.Functions/Graph/GraphFileFetcher.cs)
 
 ## Required Azure resources & permissions
@@ -53,8 +53,9 @@ Code:
 
 | Key | Where set | Example |
 | --- | --- | --- |
-| `SharePoint__DriveIds` | Functions app settings | `["b!abc123...","b!def456..."]` |
-| `SharePoint__Schedule` | Functions app settings | `0 */30 * * * *` (every 30 min) |
+| `CosmosDb__Endpoint` | Functions + Portal app settings | `https://<cosmos>.documents.azure.com:443/` |
+| `CosmosDb__DatabaseId` | Functions + Portal app settings | `ingestion` |
+| `CosmosDb__SourceConfigContainerId` | Functions + Portal app settings | `source-configurations` |
 | `Graph__BaseUrl` | Functions app settings | `https://graph.microsoft.com/v1.0` (`.us` for Gov-cloud) |
 
 ## Step-by-step onboarding
@@ -84,19 +85,13 @@ az rest --method GET \
 
 Copy the `id` of each drive you want to ingest.
 
-### 3. Set the configuration
+### 3. Add the source configuration
 
-```bash
-az functionapp config appsettings set \
-  --name <funcapp> --resource-group <rg> \
-  --settings \
-    'SharePoint__DriveIds=["b!abc...","b!def..."]' \
-    'SharePoint__Schedule=0 */30 * * * *'
-```
+Use Portal `Admin/Sources` to add a `sharepoint` source with the required settings (`driveIds`).
 
 ### 4. Trigger or wait for the next run
 
-The timer will pick up the new drives within 30 minutes (default). To trigger immediately, restart the Functions app.
+The dispatcher will pick up enabled sources on its next run (default every 6 hours). To trigger earlier, restart the Functions app.
 
 ## How to verify
 
@@ -129,7 +124,7 @@ dependencies
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
 | Function logs `403` from Graph | Admin consent not granted | Re-run [`docs/DEPLOYMENT.md`](../DEPLOYMENT.md) Appendix B |
-| Function logs `429` from Graph | Per-tenant throttle | Increase `SharePoint__Schedule` interval or split drives across multiple Function instances |
+| Function logs `429` from Graph | Per-tenant throttle | Reduce source scope (fewer drives per source) or split into multiple source configurations |
 | Blob lands but no search hit | `securityIds` empty (fail-closed) | Check Graph permission resolution — `customDimensions.securityIds == "[]"` in App Insights |
 | Drive disappears | Drive renamed in SharePoint | Drive ID is stable across renames; verify the drive still exists via the lookup in step 2 |
 

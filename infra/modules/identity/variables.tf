@@ -22,3 +22,7 @@ variable "ingestion_identity_name" {
 variable "data_factory_identity_name" {
   type = string
 }
+
+variable "portal_identity_name" {
+  type = string
+}

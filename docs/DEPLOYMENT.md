@@ -14,7 +14,7 @@ This guide is intentionally exhaustive. Read it through once before running any 
 > | --- | --- |
 > | `azd env new <name>` + `azd env set` | `terraform workspace new <env>` + edit [infra/envs/dev.tfvars](../infra/envs/dev.tfvars) / [infra/envs/prod.tfvars](../infra/envs/prod.tfvars) |
 > | `azd provision` | One-time `cd infra/bootstrap && terraform init && terraform apply` (creates remote state SA), then `cd infra && terraform init -backend-config=…  && terraform apply -var-file=envs/<env>.tfvars` |
-> | `azd deploy` | `dotnet publish` → upload ZIPs to the platform storage `deploy` container → set `WEBSITE_RUN_FROM_PACKAGE` URL on App Service and Function App. The CI workflow [.github/workflows/terraform.yml](../.github/workflows/terraform.yml) does this automatically after a successful Terraform apply. |
+> | `azd deploy` | `dotnet publish` → upload ZIPs to the platform storage `deploy` container → set `WEBSITE_RUN_FROM_PACKAGE` URL on MCP App Service, Portal App Service, and Function App. The CI workflow [.github/workflows/terraform.yml](../.github/workflows/terraform.yml) does this automatically after a successful Terraform apply. |
 > | `terraform -chdir=infra output -json` | `terraform -chdir=infra output -json > tfout.json` |
 > | `infra/main.bicep` + `infra/modules/*.bicep` | [infra/main.tf](../infra/main.tf), [infra/primary.tf](../infra/primary.tf), [infra/secondary.tf](../infra/secondary.tf), [infra/frontdoor.tf](../infra/frontdoor.tf), [infra/roles.tf](../infra/roles.tf), [infra/outputs.tf](../infra/outputs.tf), and `infra/modules/<name>/*.tf` |
 > | `.github/workflows/terraform.yml` | Active workflow for terraform validate/plan/apply and application deployment. |
@@ -129,12 +129,14 @@ These are the parameters and configuration choices you will be asked for. Decide
 | **Foundry embedding deployment** | `embeddingDeployment` parameter | `text-embedding-3-large` | **Pick once and treat as versioned** — switching forces re-embedding the entire corpus. |
 | **AI Search SKU** | `AZURE_SEARCH_SKU` | `standard` | `basic` works for a small POC; `standard2` / `standard3` for production at scale. |
 | **App Service Plan SKU** | `AZURE_APP_SERVICE_PLAN_SKU` | `B1` | Step up to `P1v3` or higher for production load and to support VNet integration. |
+| **Public MCP endpoint** | `mcp_public_network_access_enabled` ([infra/variables.tf](../infra/variables.tf)) | `false` | Set `true` when external MCP clients must connect directly to App Service. Keep auth enabled and monitor traffic. |
 | **CMK on/off** | `enableCmk` parameter | `false` | Decide before first deploy. Switching after the fact is non-trivial on AI Search. |
 | **Multi-region DR** | `secondaryLocation` parameter | empty (off) | Only enable if the second region has the same model availability as the primary. |
 | **Storage replication** | `storageSku` parameter | `Standard_LRS` | Auto-promoted to `Standard_RAGZRS` when DR is enabled. |
 | **Auth audience** | `Auth__Audience` app setting | `api://<siteName>` | Decide whether to keep the auto-generated audience or front with a command-managed app registration exposing a named scope (e.g., `MCP.Read`). |
 | **Reuse existing AI Search** | `use_existing_search` ([infra/variables.tf](../infra/variables.tf)) | `false` | Set `true` only when the Search service already exists in the target RG and Terraform should reference (not create) it. See [§7.4](#74-reuse-existing-resources-skip-create-toggles). |
 | **Reuse existing Foundry account** | `use_existing_foundry_account` | `false` | Set `true` when an upstream platform team already owns the Foundry account. Model deployments and project connections must be managed out-of-band. See [§7.4](#74-reuse-existing-resources-skip-create-toggles). |
+| **Reuse existing VNet / PE subnet / private DNS** | `use_existing_vnet` | `false` | Set `true` when the environment already has a VNet. Supply the existing app/functions/PE subnet IDs plus private DNS zone IDs; the private endpoints still deploy into the supplied PE subnet. See [§7.4](#74-reuse-existing-resources-skip-create-toggles). |
 | **Reuse existing Data Factory** | `use_existing_data_factory` | `false` | Set `true` only when ADF pipelines/triggers/SHIR are managed elsewhere. Incompatible with `enable_data_factory_pipelines=true`. See [§7.4](#74-reuse-existing-resources-skip-create-toggles). |
 | **Reuse existing Front Door** | `use_existing_front_door` | `false` | DR-only. Set `true` when an existing AFD profile + endpoint should be reused; origin group + route stay out-of-band. See [§7.4](#74-reuse-existing-resources-skip-create-toggles). |
 | **Pilot SharePoint drive IDs** | `SharePoint__DriveIds` (Function App settings) | empty | Start narrow. Default empty until data owner sign-off is in writing. See [`docs/INGESTION.md`](INGESTION.md) for the full ingestion guide and [`docs/ingestion/sharepoint-files.md`](ingestion/sharepoint-files.md) for the drive-ID lookup procedure. |
@@ -374,7 +376,7 @@ The complete schema is in [infra/variables.tf](../infra/variables.tf).
 
 ### 7.4 Reuse existing resources (skip-create toggles)
 
-Some Azure resources may already exist in the target subscription because they were stood up by a prior deployment, a shared-platform team, or a Bicep run that predates the Terraform migration. The toggles below let Terraform **reference** an existing resource via a `data` source instead of trying to **create** it. RBAC, app settings, alerts, and outputs are still wired against the referenced resource ID, so the rest of the stack continues to work unchanged.
+Some Azure resources may already exist in the target subscription because they were stood up by a prior deployment, a shared-platform team, or a Bicep run that predates the Terraform migration. The toggles below let Terraform **reference** an existing resource via a `data` source instead of trying to **create** it. RBAC, app settings, alerts, private endpoints, and outputs are still wired against the referenced resource ID, so the rest of the stack continues to work unchanged.
 
 Each toggle defaults to `false` (create from scratch). Flip to `true` only when the matching Azure resource is already present and you want Terraform to leave its lifecycle alone.
 
@@ -382,6 +384,7 @@ Each toggle defaults to `false` (create from scratch). Flip to `true` only when 
 | --- | --- | --- | --- |
 | `use_existing_search` | `false` | Skips creating the AI Search service. Reads the existing service via `data.azurerm_search_service.existing` and uses its name + endpoint downstream. | `existing_search_name` (defaults to `local.names.search`), `existing_search_resource_group_name` (defaults to the primary RG). |
 | `use_existing_foundry_account` | `false` | Skips creating the Foundry (Cognitive Services AIServices) account **and** its project, model deployments, and project connections. Reads the existing account via `data.azurerm_cognitive_account.existing_foundry`. | `existing_foundry_account_name`, `existing_foundry_account_resource_group_name`, `existing_foundry_project_name`. |
+| `use_existing_vnet` | `false` | Skips creating the VNet, subnets, and private DNS zones. The App Service / Function App VNet integration and private endpoints still deploy, but they consume the supplied existing subnet IDs + private DNS zone IDs. | `existing_subnet_app_id`, `existing_subnet_functions_id`, `existing_subnet_pe_id`, `existing_private_dns_zone_ids`. |
 | `use_existing_data_factory` | `false` | Skips creating the Data Factory **and every child resource defined inside the module** (linked services, datasets, pipelines, triggers, SHIR). Reads the existing factory via `data.azurerm_data_factory.existing`. | `existing_data_factory_name`, `existing_data_factory_resource_group_name`. Incompatible with `enable_data_factory_pipelines=true`, `enable_self_hosted_integration_runtime=true`, and `enable_shir_host_vm=true` — plan-time precondition will fail. |
 | `use_existing_front_door` | `false` | (DR only — no-op when `secondary_location=""`). Skips creating the Front Door profile, endpoint, origin group, origins, and route. Reads the existing profile + endpoint via `data.azurerm_cdn_frontdoor_profile.existing` / `data.azurerm_cdn_frontdoor_endpoint.existing`. | `existing_front_door_profile_name`, `existing_front_door_endpoint_name` (defaults to `{profile}-ep`), `existing_front_door_resource_group_name`. |
 
@@ -472,13 +475,14 @@ Expected outputs include:
 
 - `MCP_SERVER_BASE_URL` — full HTTPS URL of the App Service (or Front Door endpoint when DR enabled).
 - `APP_SERVICE_NAME`, `APP_SERVICE_HOSTNAME`
+- `PORTAL_APP_SERVICE_NAME`, `PORTAL_APP_SERVICE_HOSTNAME`, `PORTAL_BASE_URL`
 - `FUNCTION_APP_NAME`
 - `STORAGE_ACCOUNT_NAME`, `STORAGE_BLOB_ENDPOINT`, `STORAGE_DFS_ENDPOINT`
 - `SEARCH_ENDPOINT`, `SEARCH_NAME`, `SEARCH_INDEX_NAME=documents`
 - `FOUNDRY_ACCOUNT_ENDPOINT`, `FOUNDRY_PROJECT_ENDPOINT`, `FOUNDRY_CHAT_DEPLOYMENT`, `FOUNDRY_EMBEDDING_DEPLOYMENT`
 - `DOCUMENT_INTELLIGENCE_ENDPOINT`
 - `SYNAPSE_SERVERLESS_SQL_ENDPOINT`, `SYNAPSE_WORKSPACE_NAME`
-- `MCP_SERVER_IDENTITY_CLIENT_ID`, `INGESTION_IDENTITY_CLIENT_ID`
+- `MCP_SERVER_IDENTITY_CLIENT_ID`, `INGESTION_IDENTITY_CLIENT_ID`, `PORTAL_IDENTITY_CLIENT_ID`
 
 ### 9.2 Verify Foundry deployments
 
@@ -634,7 +638,7 @@ az webapp config appsettings set -n "$APP" -g "$RG" --settings \
 
 ## 11. Deploy application code
 
-There is no `azd deploy` step. Application code is deployed with `dotnet publish`, blob upload to the platform storage `deploy` container, and `WEBSITE_RUN_FROM_PACKAGE` app-setting updates (no Kudu dependency). The CI workflow [.github/workflows/terraform.yml](../.github/workflows/terraform.yml) does this automatically after apply; the manual procedure is below for local / break-glass use.
+There is no `azd deploy` step. Application code is deployed with `dotnet publish`, blob upload to the platform storage `deploy` container, and `WEBSITE_RUN_FROM_PACKAGE` app-setting updates (no Kudu dependency). The durable pattern uses unsigned blob URLs plus managed identity (`WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID`) so app settings do not depend on expiring SAS tokens. The CI workflow [.github/workflows/terraform.yml](../.github/workflows/terraform.yml) does this automatically after apply; the manual procedure is below for local / break-glass use.
 
 ### 11.1 Build and upload packages
 
@@ -642,6 +646,7 @@ There is no `azd deploy` step. Application code is deployed with `dotnet publish
 cd "$(git rev-parse --show-toplevel)"
 RG="$(terraform -chdir=infra output -raw AZURE_RESOURCE_GROUP)"
 APP="$(terraform -chdir=infra output -raw APP_SERVICE_NAME)"
+PORTAL_APP="$(terraform -chdir=infra output -raw PORTAL_APP_SERVICE_NAME)"
 FN="$(terraform -chdir=infra output -raw FUNCTION_APP_NAME)"
 STORAGE_ACCOUNT="$(terraform -chdir=infra output -raw STORAGE_ACCOUNT_NAME)"
 STORAGE_BLOB_ENDPOINT="$(terraform -chdir=infra output -raw STORAGE_BLOB_ENDPOINT)"
@@ -658,36 +663,22 @@ dotnet publish src/DataAiMcp.Ingestion.Functions/DataAiMcp.Ingestion.Functions.c
   /p:UseAppHost=false
 (cd publish/functions && zip -qr ../functions.zip .)
 
-EXPIRY_UTC="$(date -u -d '+30 days' '+%Y-%m-%dT%H:%MZ')"
-MCP_BLOB_NAME="mcp-server-$(date -u +%Y%m%d%H%M%S).zip"
-FUNC_BLOB_NAME="functions-$(date -u +%Y%m%d%H%M%S).zip"
+dotnet publish src/DataAiMcp.Portal/DataAiMcp.Portal.csproj \
+  --configuration Release \
+  --output publish/portal \
+  /p:UseAppHost=false
+(cd publish/portal && zip -qr ../portal.zip .)
 
-MCP_UPLOAD_SAS="$(az storage blob generate-sas \
-  --account-name "$STORAGE_ACCOUNT" \
-  --container-name deploy \
-  --name "$MCP_BLOB_NAME" \
-  --permissions acw \
-  --expiry "$EXPIRY_UTC" \
-  --https-only \
-  --as-user \
-  --auth-mode login -o tsv)"
-
-FUNC_UPLOAD_SAS="$(az storage blob generate-sas \
-  --account-name "$STORAGE_ACCOUNT" \
-  --container-name deploy \
-  --name "$FUNC_BLOB_NAME" \
-  --permissions acw \
-  --expiry "$EXPIRY_UTC" \
-  --https-only \
-  --as-user \
-  --auth-mode login -o tsv)"
+MCP_BLOB_NAME="mcp-server-current.zip"
+FUNC_BLOB_NAME="functions-current.zip"
+PORTAL_BLOB_NAME="portal-current.zip"
 
 az storage blob upload \
   --account-name "$STORAGE_ACCOUNT" \
   --container-name deploy \
   --name "$MCP_BLOB_NAME" \
   --file publish/mcp-server.zip \
-  --sas-token "$MCP_UPLOAD_SAS" \
+  --auth-mode login \
   --overwrite true
 
 az storage blob upload \
@@ -695,31 +686,35 @@ az storage blob upload \
   --container-name deploy \
   --name "$FUNC_BLOB_NAME" \
   --file publish/functions.zip \
-  --sas-token "$FUNC_UPLOAD_SAS" \
+  --auth-mode login \
   --overwrite true
 
-MCP_READ_SAS="$(az storage blob generate-sas \
+az storage blob upload \
   --account-name "$STORAGE_ACCOUNT" \
   --container-name deploy \
-  --name "$MCP_BLOB_NAME" \
-  --permissions r \
-  --expiry "$EXPIRY_UTC" \
-  --https-only \
-  --as-user \
-  --auth-mode login -o tsv)"
+  --name "$PORTAL_BLOB_NAME" \
+  --file publish/portal.zip \
+  --auth-mode login \
+  --overwrite true
 
-FUNC_READ_SAS="$(az storage blob generate-sas \
-  --account-name "$STORAGE_ACCOUNT" \
-  --container-name deploy \
-  --name "$FUNC_BLOB_NAME" \
-  --permissions r \
-  --expiry "$EXPIRY_UTC" \
-  --https-only \
-  --as-user \
-  --auth-mode login -o tsv)"
+MCP_IDENTITY_RESOURCE_ID="$(az webapp identity show \
+  --resource-group "$RG" \
+  --name "$APP" \
+  --query "keys(userAssignedIdentities)[0]" -o tsv)"
 
-MCP_PACKAGE_URL="${STORAGE_BLOB_ENDPOINT}deploy/${MCP_BLOB_NAME}?${MCP_READ_SAS}"
-FUNC_PACKAGE_URL="${STORAGE_BLOB_ENDPOINT}deploy/${FUNC_BLOB_NAME}?${FUNC_READ_SAS}"
+FUNC_IDENTITY_RESOURCE_ID="$(az functionapp identity show \
+  --resource-group "$RG" \
+  --name "$FN" \
+  --query "keys(userAssignedIdentities)[0]" -o tsv)"
+
+PORTAL_IDENTITY_RESOURCE_ID="$(az webapp identity show \
+  --resource-group "$RG" \
+  --name "$PORTAL_APP" \
+  --query "keys(userAssignedIdentities)[0]" -o tsv)"
+
+MCP_PACKAGE_URL="${STORAGE_BLOB_ENDPOINT}deploy/${MCP_BLOB_NAME}"
+FUNC_PACKAGE_URL="${STORAGE_BLOB_ENDPOINT}deploy/${FUNC_BLOB_NAME}"
+PORTAL_PACKAGE_URL="${STORAGE_BLOB_ENDPOINT}deploy/${PORTAL_BLOB_NAME}"
 ```
 
 ### 11.2 Configure run-from-package URLs
@@ -728,31 +723,69 @@ FUNC_PACKAGE_URL="${STORAGE_BLOB_ENDPOINT}deploy/${FUNC_BLOB_NAME}?${FUNC_READ_S
 az webapp config appsettings set \
   --resource-group "$RG" \
   --name "$APP" \
-  --settings WEBSITE_RUN_FROM_PACKAGE="$MCP_PACKAGE_URL"
+  --settings \
+  WEBSITE_RUN_FROM_PACKAGE="$MCP_PACKAGE_URL" \
+  WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID="$MCP_IDENTITY_RESOURCE_ID"
 
 az functionapp config appsettings set \
   --resource-group "$RG" \
   --name "$FN" \
-  --settings WEBSITE_RUN_FROM_PACKAGE="$FUNC_PACKAGE_URL"
+  --settings \
+  WEBSITE_RUN_FROM_PACKAGE="$FUNC_PACKAGE_URL" \
+  WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID="$FUNC_IDENTITY_RESOURCE_ID"
+
+az webapp config appsettings set \
+  --resource-group "$RG" \
+  --name "$PORTAL_APP" \
+  --settings \
+  WEBSITE_RUN_FROM_PACKAGE="$PORTAL_PACKAGE_URL" \
+  WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID="$PORTAL_IDENTITY_RESOURCE_ID"
 
 az webapp restart --resource-group "$RG" --name "$APP"
 az functionapp restart --resource-group "$RG" --name "$FN"
+az webapp restart --resource-group "$RG" --name "$PORTAL_APP"
 ```
 
-### 11.3 Ingestion Functions (notes)
+### 11.3 Required RBAC for package reads
+
+All app managed identities must be able to read blobs in the storage account:
+
+```bash
+STORAGE_ID="$(az storage account show -g "$RG" -n "$STORAGE_ACCOUNT" --query id -o tsv)"
+
+az role assignment create \
+  --assignee-object-id "$(az webapp identity show -g "$RG" -n "$APP" --query "userAssignedIdentities.*.principalId | [0]" -o tsv)" \
+  --assignee-principal-type ServicePrincipal \
+  --role "Storage Blob Data Reader" \
+  --scope "$STORAGE_ID"
+
+az role assignment create \
+  --assignee-object-id "$(az functionapp identity show -g "$RG" -n "$FN" --query "userAssignedIdentities.*.principalId | [0]" -o tsv)" \
+  --assignee-principal-type ServicePrincipal \
+  --role "Storage Blob Data Reader" \
+  --scope "$STORAGE_ID"
+
+az role assignment create \
+  --assignee-object-id "$(az webapp identity show -g "$RG" -n "$PORTAL_APP" --query "userAssignedIdentities.*.principalId | [0]" -o tsv)" \
+  --assignee-principal-type ServicePrincipal \
+  --role "Storage Blob Data Reader" \
+  --scope "$STORAGE_ID"
+```
+
+### 11.4 Ingestion Functions (notes)
 
 Kudu zip deploy (`az functionapp deployment source config-zip`) is intentionally not used because both apps run with public network access disabled.
 
 Cold-start latency on the first request is normal; subsequent requests warm up.
 
-### 11.4 Run the post-deploy smoke
+### 11.5 Run the post-deploy smoke
 
 ```bash
 terraform -chdir=infra output -json > infra/tfout.json
 TFOUT_JSON=$(pwd)/infra/tfout.json ./infra/scripts/postdeploy.sh
 ```
 
-This hits `/healthz` on the deployed URL and runs `tests/DataAiMcp.Smoke.Tests` against the deployed `MCP_SERVER_BASE_URL`. A non-zero exit indicates the smoke project failed; review the test output before declaring victory.
+This hits `/healthz` on the deployed MCP URL, verifies the portal endpoint is reachable, and runs `tests/DataAiMcp.Smoke.Tests` against the deployed `MCP_SERVER_BASE_URL`. A non-zero exit indicates the smoke project failed; review the test output before declaring victory.
 
 ---
 
@@ -903,6 +936,8 @@ The Terraform workflows pull the remote-state location from **repository variabl
 
 `infra/envs/<env>.tfvars` files are **gitignored** (see [.gitignore](../.gitignore) line 37: `*.tfvars`). CI cannot read a file that isn't in the repo, so the workflows reconstruct each tfvars file from a repo-scoped GitHub Variable before running `terraform plan` / `terraform destroy`:
 
+For this repository, that means the GitHub Variables are the source of truth for CI, including the new existing-network block (`use_existing_vnet`, subnet IDs, and private DNS zone IDs). If you change [infra/envs/dev.tfvars](../infra/envs/dev.tfvars) or [infra/envs/prod.tfvars](../infra/envs/prod.tfvars), copy the same full contents into `TFVARS_DEV` and/or `TFVARS_PROD`.
+
 | Variable | Value |
 | --- | --- |
 | `TFVARS_DEV` | Full contents of [infra/envs/dev.tfvars](../infra/envs/dev.tfvars) (paste as plain text). |
@@ -1033,7 +1068,7 @@ Only required if you change the embedding model or its dimension. Procedure:
 | Sample client: `AADSTS50020` "user account does not exist in tenant" | Mixed-cloud auth — credentials cached for commercial cloud. | `az logout`, run [§6](#6-authenticate-to-azure-government), retry. |
 | `query_structured_data` fails with `model not found` | `chatDeployment` parameter doesn't match an actual deployment in Foundry. | Confirm with `az cognitiveservices account deployment list ...` and reconcile. |
 | `query_structured_data` fails with `Login failed for user` against Synapse | Synapse AAD admin not set, or principal not granted. | Confirm `principal_id` was set in your tfvars; re-run `terraform apply -var-file=envs/<env>.tfvars`. |
-| App Service restarts but serves old or broken code after deploy | Package URL missing/expired or app settings drift. | `az webapp config appsettings list -n $APP -g $RG --query "[?name=='WEBSITE_RUN_FROM_PACKAGE']"` and verify the URL is reachable; then re-run §11 deploy steps to upload a new package and refresh the URL. |
+| App Service restarts but serves old or broken code after deploy | Package URL/app MI setting drift, or MI lacks blob read role. | `az webapp config appsettings list -n $APP -g $RG --query "[?name=='WEBSITE_RUN_FROM_PACKAGE' || name=='WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID']"`; confirm the blob URL is unsigned and MI setting is present, then verify `Storage Blob Data Reader` on the storage account for the app identity and re-run §11 deploy steps. |
 | Foundry token cost alert fires unexpectedly | A user is asking very large `query_structured_data` questions. | Review App Insights traces for the `RagOrchestrator` and `SqlGenerator` source. Consider rate limits or per-user role gating. |
 | `terraform destroy` fails with "Key Vault has soft-deleted resources" | Previous deploy left soft-deleted resources blocking re-create. | `az keyvault purge --name <kv-name>` (after confirming no production data), then re-run `terraform destroy`. |
 

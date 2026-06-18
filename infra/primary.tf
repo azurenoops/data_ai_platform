@@ -24,7 +24,9 @@ module "monitoring" {
 # In hub-and-spoke topologies the platform team usually owns the VNet and
 # central private DNS. Set use_existing_vnet=true and supply the subnet IDs
 # (existing_subnet_*_id) + a map of pre-existing private DNS zone IDs
-# (existing_private_dns_zone_ids) to bypass this module entirely.
+# (existing_private_dns_zone_ids) to bypass this module entirely. The private
+# endpoints still deploy; they simply land in the supplied PE subnet and link
+# to the supplied private DNS zone IDs instead of the managed ones.
 # ---------------------------------------------------------------------------
 module "network" {
   source = "./modules/network"
@@ -38,11 +40,13 @@ module "network" {
   subnet_app_address_prefix       = var.subnet_app_address_prefix
   subnet_functions_address_prefix = var.subnet_functions_address_prefix
   subnet_pe_address_prefix        = var.subnet_pe_address_prefix
+  private_dns_zone_names          = var.private_dns_zone_names
 }
 
 # Plan-time validator: when use_existing_vnet=true, every existing_* input
 # must be supplied. terraform_data + lifecycle.precondition gives a clear
-# error message instead of a downstream "value cannot be null" failure.
+# error message instead of a downstream "value cannot be null" failure. The
+# private endpoints depend on these values even when the VNet module is skipped.
 resource "terraform_data" "validate_existing_vnet_inputs" {
   lifecycle {
     precondition {
@@ -59,7 +63,8 @@ resource "terraform_data" "validate_existing_vnet_inputs" {
 }
 
 # Indirection so downstream PEs and module wiring don't care whether the
-# VNet/DNS were created here or supplied by a platform team.
+# VNet/DNS were created here or supplied by a platform team. The PE resources
+# consume these locals directly.
 locals {
   subnet_app_id        = var.use_existing_vnet ? var.existing_subnet_app_id : module.network[0].subnet_app_id
   subnet_functions_id  = var.use_existing_vnet ? var.existing_subnet_functions_id : module.network[0].subnet_functions_id
@@ -76,6 +81,7 @@ module "identity" {
   mcp_server_identity_name   = local.names.mcp_server_identity
   ingestion_identity_name    = local.names.ingestion_identity
   data_factory_identity_name = local.names.data_factory_identity
+  portal_identity_name       = local.names.portal_identity
 }
 
 module "keyvault" {
@@ -198,6 +204,18 @@ module "document_intelligence" {
   cmk_user_assigned_identity_client_id = local.cmk_user_assigned_identity_client_id
 }
 
+module "cosmosdb" {
+  source = "./modules/cosmosdb"
+
+  resource_group_name           = azurerm_resource_group.primary.name
+  location                      = var.location
+  tags                          = local.tags
+  account_name                  = local.names.cosmos_account
+  database_name                 = var.cosmos_db_database_name
+  source_config_container_name  = var.cosmos_db_source_config_container_name
+  public_network_access_enabled = var.cosmos_db_public_network_access_enabled
+}
+
 # ---------------------------------------------------------------------------
 # Private endpoints
 #
@@ -288,23 +306,63 @@ module "appservice" {
   user_assigned_identity_client_id = module.identity.mcp_server_identity_client_id
   app_insights_connection_string   = module.monitoring.app_insights_connection_string
   virtual_network_subnet_id        = local.subnet_app_id
+  public_network_access_enabled    = var.mcp_public_network_access_enabled
   app_settings = {
-    AZURE_CLIENT_ID                = module.identity.mcp_server_identity_client_id
-    AZURE_TENANT_ID                = data.azurerm_client_config.current.tenant_id
-    Search__Endpoint               = local.search_endpoint
-    Search__IndexName              = "documents"
-    Foundry__Endpoint              = local.foundry_account_endpoint
-    Foundry__ProjectEndpoint       = local.foundry_project_endpoint
-    Foundry__ChatDeployment        = var.chat_deployment
-    Foundry__EmbeddingDeployment   = var.embedding_deployment
-    Storage__AccountName           = module.storage.storage_account_name
-    Storage__CuratedContainer      = "curated"
-    Synapse__ServerlessSqlEndpoint = module.synapse.serverless_sql_endpoint
-    Synapse__Database              = "master"
-    Auth__TenantId                 = data.azurerm_client_config.current.tenant_id
-    Auth__Audience                 = local.app_audience
-    Search__CmkKeyVaultUri         = local.cmk_key_vault_uri
-    Search__CmkKeyName             = local.cmk_key_name
+    AZURE_CLIENT_ID                              = module.identity.mcp_server_identity_client_id
+    AZURE_TENANT_ID                              = data.azurerm_client_config.current.tenant_id
+    Search__Endpoint                             = local.search_endpoint
+    Search__IndexName                            = "documents"
+    Foundry__Endpoint                            = local.foundry_account_endpoint
+    Foundry__ProjectEndpoint                     = local.foundry_project_endpoint
+    Foundry__ChatDeployment                      = var.chat_deployment
+    Foundry__EmbeddingDeployment                 = var.embedding_deployment
+    Storage__AccountName                         = module.storage.storage_account_name
+    Storage__CuratedContainer                    = "curated"
+    WEBSITE_RUN_FROM_PACKAGE                     = "${module.storage.blob_endpoint}deploy/mcp-server-current.zip"
+    WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID = module.identity.mcp_server_identity_id
+    Synapse__ServerlessSqlEndpoint               = module.synapse.serverless_sql_endpoint
+    Synapse__Database                            = "master"
+    Auth__TenantId                               = data.azurerm_client_config.current.tenant_id
+    Auth__Audience                               = local.app_audience
+    Search__CmkKeyVaultUri                       = local.cmk_key_vault_uri
+    Search__CmkKeyName                           = local.cmk_key_name
+  }
+}
+
+module "portal_appservice" {
+  source = "./modules/appservice"
+
+  resource_group_name              = azurerm_resource_group.primary.name
+  location                         = var.location
+  tags                             = merge(local.tags, { "azd-service-name" = "portal" })
+  plan_name                        = "${local.names.app_service_plan}-portal"
+  site_name                        = local.names.portal_app_service
+  sku                              = var.app_service_plan_sku
+  user_assigned_identity_id        = module.identity.portal_identity_id
+  user_assigned_identity_client_id = module.identity.portal_identity_client_id
+  app_insights_connection_string   = module.monitoring.app_insights_connection_string
+  virtual_network_subnet_id        = local.subnet_app_id
+  public_network_access_enabled    = var.portal_public_network_access_enabled
+  app_settings = {
+    AZURE_CLIENT_ID                              = module.identity.portal_identity_client_id
+    Portal__McpBaseUrl                           = local.enable_dr ? local.front_door_endpoint_url : "https://${module.appservice.default_host_name}"
+    Portal__McpAudience                          = local.app_audience
+    Portal__SubscriptionId                       = data.azurerm_subscription.current.subscription_id
+    Portal__ResourceGroupName                    = azurerm_resource_group.primary.name
+    Portal__DataFactoryName                      = coalesce(var.existing_data_factory_name, local.names.data_factory)
+    Portal__SqlPipelineName                      = "pl_sql_mi_to_adls"
+    Portal__StorageAccountUrl                    = module.storage.blob_endpoint
+    Portal__LandingContainerName                 = "landing"
+    AzureAd__Instance                            = var.portal_azuread_instance
+    AzureAd__TenantId                            = var.portal_azuread_tenant_id != "" ? var.portal_azuread_tenant_id : data.azurerm_client_config.current.tenant_id
+    AzureAd__ClientId                            = var.portal_azuread_client_id
+    AzureAd__CallbackPath                        = "/signin-oidc"
+    AzureAd__SignedOutCallbackPath               = "/signout-callback-oidc"
+    CosmosDb__Endpoint                           = module.cosmosdb.endpoint
+    CosmosDb__DatabaseId                         = module.cosmosdb.database_name
+    CosmosDb__SourceConfigContainerId            = module.cosmosdb.source_config_container_name
+    WEBSITE_RUN_FROM_PACKAGE                     = "${module.storage.blob_endpoint}deploy/portal-current.zip"
+    WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID = module.identity.portal_identity_id
   }
 }
 
@@ -322,22 +380,24 @@ module "functions" {
   app_insights_connection_string   = module.monitoring.app_insights_connection_string
   virtual_network_subnet_id        = local.subnet_functions_id
   app_settings = {
-    AZURE_CLIENT_ID                = module.identity.ingestion_identity_client_id
-    Storage__AccountName           = module.storage.storage_account_name
-    Storage__LandingContainer      = "landing"
-    Storage__RawContainer          = "raw"
-    Storage__CuratedContainer      = "curated"
-    Storage__ChunksContainer       = "chunks"
-    Search__Endpoint               = local.search_endpoint
-    Search__IndexName              = "documents"
-    Foundry__Endpoint              = local.foundry_account_endpoint
-    Foundry__EmbeddingDeployment   = var.embedding_deployment
-    DocumentIntelligence__Endpoint = module.document_intelligence.endpoint
-    Graph__TenantId                = data.azurerm_client_config.current.tenant_id
-    SharePoint__Schedule           = "0 */30 * * * *"
-    OneDrive__Schedule             = "0 0 */6 * * *"
-    Search__CmkKeyVaultUri         = local.cmk_key_vault_uri
-    Search__CmkKeyName             = local.cmk_key_name
+    AZURE_CLIENT_ID                              = module.identity.ingestion_identity_client_id
+    Storage__AccountName                         = module.storage.storage_account_name
+    Storage__LandingContainer                    = "landing"
+    Storage__RawContainer                        = "raw"
+    Storage__CuratedContainer                    = "curated"
+    Storage__ChunksContainer                     = "chunks"
+    Search__Endpoint                             = local.search_endpoint
+    Search__IndexName                            = "documents"
+    Foundry__Endpoint                            = local.foundry_account_endpoint
+    Foundry__EmbeddingDeployment                 = var.embedding_deployment
+    DocumentIntelligence__Endpoint               = module.document_intelligence.endpoint
+    Graph__TenantId                              = data.azurerm_client_config.current.tenant_id
+    CosmosDb__Endpoint                           = module.cosmosdb.endpoint
+    CosmosDb__DatabaseId                         = module.cosmosdb.database_name
+    CosmosDb__SourceConfigContainerId            = module.cosmosdb.source_config_container_name
+    WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID = module.identity.ingestion_identity_id
+    Search__CmkKeyVaultUri                       = local.cmk_key_vault_uri
+    Search__CmkKeyName                           = local.cmk_key_name
   }
 }
 

@@ -4,6 +4,7 @@
     <Project Path="src/DataAiMcp.McpServer/DataAiMcp.McpServer.csproj" />
     <Project Path="src/DataAiMcp.Ingestion.Functions/DataAiMcp.Ingestion.Functions.csproj" />
     <Project Path="src/DataAiMcp.Tools.IndexProvisioner/DataAiMcp.Tools.IndexProvisioner.csproj" />
+    <Project Path="src/DataAiMcp.Portal/DataAiMcp.Portal.csproj" />
   </Folder>
   <Folder Name="/src/Samples/">
     <Project Path="src/Samples/DataAiMcp.SampleClient.Console/DataAiMcp.SampleClient.Console.csproj" />
@@ -13,6 +14,7 @@
     <Project Path="tests/DataAiMcp.McpServer.Tests/DataAiMcp.McpServer.Tests.csproj" />
     <Project Path="tests/DataAiMcp.Functions.Tests/DataAiMcp.Functions.Tests.csproj" />
     <Project Path="tests/DataAiMcp.Smoke.Tests/DataAiMcp.Smoke.Tests.csproj" />
+    <Project Path="tests/DataAiMcp.Portal.Tests/DataAiMcp.Portal.Tests.csproj" />
   </Folder>
   <Folder Name="/solution-items/">
     <File Path="azure.yaml" />

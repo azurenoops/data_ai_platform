@@ -129,6 +129,52 @@ public sealed class RagOrchestrator
         return hits;
     }
 
+    /// <summary>
+    /// Returns the count of unique documents indexed per source, optionally filtered by caller security IDs.
+    /// Retrieves all documents (by source field), groups by source, and counts unique documentIds.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<string, int>> CountDocumentsBySourceAsync(
+        IReadOnlyCollection<string>? callerSecurityIds,
+        CancellationToken cancellationToken)
+    {
+        var options = new AzureSearchOptions
+        {
+            Filter = BuildAclFilter(callerSecurityIds),
+            Size = 1000,  // Adjust if > 1000 unique documents expected
+        };
+        options.Select.Add(SearchIndexSchema.SourceField);
+        options.Select.Add(SearchIndexSchema.DocumentIdField);
+
+        var response = await _search.SearchAsync<SearchDocument>("*", options, cancellationToken).ConfigureAwait(false);
+
+        // Group by source and count unique documentIds
+        var countsBySource = new Dictionary<string, HashSet<string>>();
+        await foreach (var page in response.Value.GetResultsAsync().AsPages())
+        {
+            foreach (var item in page.Values)
+            {
+                var doc = item.Document;
+                var source = doc.GetString(SearchIndexSchema.SourceField) ?? "unknown";
+                var documentId = doc.GetString(SearchIndexSchema.DocumentIdField) ?? "";
+
+                if (!countsBySource.TryGetValue(source, out var sourceSet))
+                {
+                    sourceSet = new HashSet<string>();
+                    countsBySource[source] = sourceSet;
+                }
+                if (!string.IsNullOrEmpty(documentId))
+                {
+                    sourceSet.Add(documentId);
+                }
+            }
+        }
+
+        var result = countsBySource.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.Count);
+        _logger.LogInformation("Counted {SourceCount} sources from {DocumentCount} total document chunks.", 
+            result.Count, countsBySource.Values.Sum(s => s.Count));
+        return result;
+    }
+
     private static string? BuildFilter(string? source, IReadOnlyCollection<string>? callerSecurityIds)
     {
         var clauses = new List<string>(2);

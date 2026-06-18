@@ -35,6 +35,7 @@ This guide is the development companion to:
 22. [Pitfalls specific to development](#22-pitfalls-specific-to-development)
 23. [Appendix A — File-by-file extension map](#appendix-a--file-by-file-extension-map)
 24. [Appendix B — Definition of Done checklist](#appendix-b--definition-of-done-checklist)
+25. [Appendix C — Portal Tailwind workflow](#appendix-c--portal-tailwind-workflow)
 
 ---
 
@@ -141,9 +142,8 @@ DataAiMcp.Ingestion.Functions/
 ├── Program.cs                        # Functions host + DI
 ├── host.json
 ├── local.settings.template.json      # Copy → local.settings.json for local dev
+├── DispatcherFunction.cs             # Timer trigger dispatcher for configured sources
 ├── IngestBlobFunction.cs             # BlobTrigger("landing/{name}")
-├── SharePointFilesFunction.cs        # Timer trigger, Graph SharePoint pull
-├── OneDriveFilesFunction.cs          # Timer trigger, Graph OneDrive pull
 ├── CurationFunction.cs               # Optional curation step, raw → curated
 ├── Graph/
 │   ├── GraphClientFactory.cs         # MUST be retargeted to graph.microsoft.us for Gov
@@ -917,6 +917,7 @@ public sealed class MyToolTests : IClassFixture<McpServerFactory>
 [DataAiMcp.Smoke.Tests](../tests/DataAiMcp.Smoke.Tests) are run by [infra/scripts/postdeploy.sh](../infra/scripts/postdeploy.sh) after the run-from-package deployment steps complete. They:
 
 - Hit `/healthz`.
+- Check the portal endpoint (`PORTAL_BASE_URL`) for an expected 200/302/401 response.
 - Optionally exercise `tools/list` and one `search_documents` call.
 
 Extend smoke tests when adding a tool that has end-to-end side effects.
@@ -1123,6 +1124,36 @@ These are the *development* pitfalls — for *deployment* and *operational* pitf
 9. **Local Functions reaching real Azure.** `func start` will happily make calls against a real Azure environment. Make sure the `AZURE_*` env vars in `local.settings.json` point where you expect — easy to accidentally write to a production storage account.
 
 10. **CMK keys on tear-down.** Do not run `terraform destroy` against any environment with CMK enabled unless you have already exported the keys you care about, and do **not** subsequently `az keyvault purge` the soft-deleted vault — that removes the encryption keys that the storage / search service still references during their own soft-delete window.
+
+---
+
+## Appendix C — Portal Tailwind workflow
+
+The portal styling now uses a Tailwind build pipeline with a Tailspin-inspired token set.
+
+- Tailwind source: [src/DataAiMcp.Portal/Styles/tailwind.input.css](../src/DataAiMcp.Portal/Styles/tailwind.input.css)
+- Tailwind config: [src/DataAiMcp.Portal/tailwind.config.js](../src/DataAiMcp.Portal/tailwind.config.js)
+- Generated runtime CSS: [src/DataAiMcp.Portal/wwwroot/css/site.css](../src/DataAiMcp.Portal/wwwroot/css/site.css)
+- npm scripts: [src/DataAiMcp.Portal/package.json](../src/DataAiMcp.Portal/package.json)
+
+Run from [src/DataAiMcp.Portal](../src/DataAiMcp.Portal):
+
+```bash
+npm install
+npm run build:css
+```
+
+During UI work:
+
+```bash
+npm run watch:css
+```
+
+Notes:
+
+- `site.css` is generated output. Edit `tailwind.input.css` instead.
+- Tailwind `preflight` is intentionally disabled to avoid conflicts with Bootstrap in Razor pages.
+- Keep the Tailwind content scan globs in sync with new Razor page locations.
 
 ---
 

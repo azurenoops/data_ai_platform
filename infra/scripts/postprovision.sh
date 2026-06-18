@@ -39,6 +39,19 @@ export SYNAPSE_SERVERLESS_SQL_ENDPOINT="$(jq -r '.SYNAPSE_SERVERLESS_SQL_ENDPOIN
 export ENABLE_CMK="$(jq -r '.ENABLE_CMK.value' "$TFOUT_JSON")"
 export CMK_KEY_URI="$(jq -r '.CMK_KEY_URI.value' "$TFOUT_JSON")"
 
+# The shared .NET services bind options from section-shaped environment names
+# (Search__Endpoint, Search__IndexName, ...), not the legacy flat SEARCH_*
+# variables above. Export both so postprovision works locally and in CI.
+export Search__Endpoint="$SEARCH_ENDPOINT"
+export Search__IndexName="$SEARCH_INDEX_NAME"
+
+if [ "${ENABLE_CMK:-false}" = "true" ] && [ -n "${CMK_KEY_URI:-}" ] && [ "$CMK_KEY_URI" != "null" ]; then
+  Search__CmkKeyVaultUri="$(printf '%s' "$CMK_KEY_URI" | sed -E 's#(https://[^/]+/).*#\1#')"
+  Search__CmkKeyName="$(printf '%s' "$CMK_KEY_URI" | sed -E 's#^.*/keys/([^/]+).*$#\1#')"
+  Search__CmkKeyVersion="$(printf '%s' "$CMK_KEY_URI" | sed -nE 's#^.*/keys/[^/]+/([^/]+)$#\1#p')"
+  export Search__CmkKeyVaultUri Search__CmkKeyName Search__CmkKeyVersion
+fi
+
 echo "==> Provisioning AI Search index"
 dotnet run --project "${REPO_ROOT}/src/DataAiMcp.Tools.IndexProvisioner/DataAiMcp.Tools.IndexProvisioner.csproj" --configuration Release
 

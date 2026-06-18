@@ -33,3 +33,15 @@ output "data_factory_identity_client_id" {
 output "data_factory_principal_id" {
   value = azurerm_user_assigned_identity.data_factory.principal_id
 }
+
+output "portal_identity_id" {
+  value = azurerm_user_assigned_identity.portal.id
+}
+
+output "portal_identity_client_id" {
+  value = azurerm_user_assigned_identity.portal.client_id
+}
+
+output "portal_principal_id" {
+  value = azurerm_user_assigned_identity.portal.principal_id
+}

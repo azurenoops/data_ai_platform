@@ -19,8 +19,11 @@ resource "azurerm_data_factory_linked_custom_service" "sqlmi" {
   type            = "AzureSqlMI"
   description     = "Source SQL Managed Instance. AAD MI auth via the Data Factory user-assigned identity."
 
-  integration_runtime {
-    name = (local.enable_shir && var.sql_mi_use_shir) ? local.shir_name : "AutoResolveIntegrationRuntime"
+  dynamic "integration_runtime" {
+    for_each = (local.enable_shir && var.sql_mi_use_shir) ? [1] : []
+    content {
+      name = local.shir_name
+    }
   }
 
   type_properties_json = jsonencode({
@@ -28,7 +31,7 @@ resource "azurerm_data_factory_linked_custom_service" "sqlmi" {
       type  = "SecureString"
       value = "data source=${var.sql_mi_server_fqdn};initial catalog=${var.sql_mi_database};"
     }
-    authenticationType = "ManagedIdentity"
+    authenticationType = "SystemAssignedManagedIdentity"
   })
 }
 

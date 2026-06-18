@@ -66,8 +66,20 @@ output "APP_SERVICE_NAME" {
   value = module.appservice.site_name
 }
 
+output "PORTAL_APP_SERVICE_NAME" {
+  value = module.portal_appservice.site_name
+}
+
 output "APP_SERVICE_HOSTNAME" {
   value = module.appservice.default_host_name
+}
+
+output "PORTAL_APP_SERVICE_HOSTNAME" {
+  value = module.portal_appservice.default_host_name
+}
+
+output "PORTAL_BASE_URL" {
+  value = "https://${module.portal_appservice.default_host_name}"
 }
 
 # When DR is enabled the public URL is the Front Door endpoint (priority 1 = primary, 2 = secondary).
@@ -93,6 +105,22 @@ output "FRONT_DOOR_ID" {
 
 output "FUNCTION_APP_NAME" {
   value = module.functions.function_app_name
+}
+
+output "COSMOS_DB_ACCOUNT_NAME" {
+  value = module.cosmosdb.account_name
+}
+
+output "COSMOS_DB_ENDPOINT" {
+  value = module.cosmosdb.endpoint
+}
+
+output "COSMOS_DB_DATABASE_NAME" {
+  value = module.cosmosdb.database_name
+}
+
+output "COSMOS_DB_SOURCE_CONFIG_CONTAINER_NAME" {
+  value = module.cosmosdb.source_config_container_name
 }
 
 # ---- Data Factory inventory (empty when ADF pipelines are disabled or factory is reused) ----
@@ -168,6 +196,10 @@ output "MCP_SERVER_IDENTITY_CLIENT_ID" {
 
 output "INGESTION_IDENTITY_CLIENT_ID" {
   value = module.identity.ingestion_identity_client_id
+}
+
+output "PORTAL_IDENTITY_CLIENT_ID" {
+  value = module.identity.portal_identity_client_id
 }
 
 output "FUNCTION_APP_NAME_DR" {

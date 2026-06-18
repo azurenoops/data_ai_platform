@@ -1,0 +1,131 @@
+@page
+@model SqlPipelineModel
+@{
+    ViewData["Title"] = "Ingestion Run Center";
+}
+
+<div class="row g-3">
+    <div class="col-12">
+        <h1 class="display-6">Ingestion Run Center</h1>
+        <p class="text-muted">Run SQL ingestion, inspect activity metrics, and verify MCP readiness from one screen.</p>
+    </div>
+
+    <div class="col-12 col-xl-4">
+        <div class="card h-100">
+            <div class="card-header">MCP Readiness</div>
+            <div class="card-body">
+                @if (Model.IsMcpHealthy)
+                {
+                    <div class="alert alert-success">Healthy</div>
+                }
+                else
+                {
+                    <div class="alert alert-warning">Unavailable</div>
+                }
+
+                <div><strong>Base URL:</strong> @Model.McpBaseUrl</div>
+                <div><strong>Audience:</strong> @Model.McpAudience</div>
+                <div class="small text-muted mt-2">@Model.HealthDetail</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-12 col-xl-8">
+        <div class="card">
+            <div class="card-header">Run Control</div>
+            <div class="card-body">
+                <form method="post" asp-page-handler="Start" class="d-inline-block me-2 mb-2">
+                    <button class="btn btn-primary" type="submit">Start Pipeline Run</button>
+                </form>
+
+                <form method="post" asp-page-handler="Refresh" class="row g-2 align-items-end mt-1">
+                    <div class="col-12 col-lg-8">
+                        <label asp-for="RunId" class="form-label">Run ID</label>
+                        <input asp-for="RunId" class="form-control" placeholder="existing or newly started run id" />
+                    </div>
+                    <div class="col-12 col-lg-4">
+                        <button class="btn btn-outline-primary w-100" type="submit" @(string.IsNullOrWhiteSpace(Model.RunId) ? "disabled" : null)>Load Run Details</button>
+                    </div>
+                </form>
+
+                <div class="mt-3"><strong>Current Run:</strong> @(string.IsNullOrWhiteSpace(Model.RunId) ? "none" : Model.RunId)</div>
+            </div>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(Model.ResultMessage))
+    {
+        <div class="col-12">
+            <div class="alert @(Model.IsSuccess ? "alert-success" : "alert-danger")">
+                @Model.ResultMessage
+            </div>
+        </div>
+    }
+
+    @if (Model.RunInfo is not null)
+    {
+        <div class="col-12 col-lg-7">
+            <div class="card h-100">
+                <div class="card-header">Pipeline Run Summary</div>
+                <div class="card-body">
+                    <div><strong>Status:</strong> @Model.RunInfo.Status</div>
+                    <div><strong>Start:</strong> @Model.RunInfo.RunStart</div>
+                    <div><strong>End:</strong> @Model.RunInfo.RunEnd</div>
+                    <div><strong>Message:</strong> @(string.IsNullOrWhiteSpace(Model.RunInfo.Message) ? "(none)" : Model.RunInfo.Message)</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-lg-5">
+            <div class="card h-100">
+                <div class="card-header">Aggregate Metrics</div>
+                <div class="card-body">
+                    <div><strong>Total Rows Copied:</strong> @Model.TotalRowsCopied</div>
+                    <div><strong>Total Files Written:</strong> @Model.TotalFilesWritten</div>
+                    <div><strong>Total Data Read (bytes):</strong> @Model.TotalDataRead</div>
+                    <div><strong>Activity Rows:</strong> @Model.Activities.Count</div>
+                </div>
+            </div>
+        </div>
+    }
+
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">CopyTable Activity Summary</div>
+            <div class="card-body">
+                @if (Model.Activities.Count == 0)
+                {
+                    <div class="text-muted">No activity data yet. Start or refresh a run.</div>
+                }
+                else
+                {
+                    <div class="table-responsive">
+                        <table class="table table-sm table-striped">
+                            <thead>
+                                <tr>
+                                    <th>Status</th>
+                                    <th>Rows Copied</th>
+                                    <th>Files Written</th>
+                                    <th>Data Read (bytes)</th>
+                                    <th>Error Code</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var item in Model.Activities)
+                                {
+                                    <tr>
+                                        <td>@item.Status</td>
+                                        <td>@item.RowsCopied</td>
+                                        <td>@item.FilesWritten</td>
+                                        <td>@item.DataRead</td>
+                                        <td>@(string.IsNullOrWhiteSpace(item.ErrorCode) ? "-" : item.ErrorCode)</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+</div>

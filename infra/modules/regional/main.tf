@@ -64,24 +64,27 @@ module "appservice" {
   user_assigned_identity_id        = var.mcp_server_user_assigned_identity_id
   user_assigned_identity_client_id = var.mcp_server_user_assigned_identity_client_id
   app_insights_connection_string   = var.app_insights_connection_string
+  public_network_access_enabled    = var.mcp_public_network_access_enabled
   app_settings = {
-    AZURE_CLIENT_ID                = var.mcp_server_user_assigned_identity_client_id
-    AZURE_TENANT_ID                = var.tenant_id
-    Search__Endpoint               = module.search.search_endpoint
-    Search__IndexName              = "documents"
-    Search__SecondaryEndpoint      = module.search.search_endpoint
-    Foundry__Endpoint              = module.foundry.account_endpoint
-    Foundry__ProjectEndpoint       = module.foundry.project_endpoint
-    Foundry__ChatDeployment        = var.chat_deployment
-    Foundry__EmbeddingDeployment   = var.embedding_deployment
-    Storage__AccountName           = module.storage.storage_account_name
-    Storage__CuratedContainer      = "curated"
-    Synapse__ServerlessSqlEndpoint = ""
-    Synapse__Database              = "master"
-    Auth__TenantId                 = var.tenant_id
-    Auth__Audience                 = var.app_audience
-    Search__CmkKeyVaultUri         = var.cmk_key_vault_uri
-    Search__CmkKeyName             = var.cmk_key_name
+    AZURE_CLIENT_ID                              = var.mcp_server_user_assigned_identity_client_id
+    AZURE_TENANT_ID                              = var.tenant_id
+    Search__Endpoint                             = module.search.search_endpoint
+    Search__IndexName                            = "documents"
+    Search__SecondaryEndpoint                    = module.search.search_endpoint
+    Foundry__Endpoint                            = module.foundry.account_endpoint
+    Foundry__ProjectEndpoint                     = module.foundry.project_endpoint
+    Foundry__ChatDeployment                      = var.chat_deployment
+    Foundry__EmbeddingDeployment                 = var.embedding_deployment
+    Storage__AccountName                         = module.storage.storage_account_name
+    Storage__CuratedContainer                    = "curated"
+    WEBSITE_RUN_FROM_PACKAGE                     = "${module.storage.blob_endpoint}deploy/mcp-server-current.zip"
+    WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID = var.mcp_server_user_assigned_identity_id
+    Synapse__ServerlessSqlEndpoint               = ""
+    Synapse__Database                            = "master"
+    Auth__TenantId                               = var.tenant_id
+    Auth__Audience                               = var.app_audience
+    Search__CmkKeyVaultUri                       = var.cmk_key_vault_uri
+    Search__CmkKeyName                           = var.cmk_key_name
   }
 }
 
@@ -111,10 +114,11 @@ module "functions" {
     DocumentIntelligence__Endpoint = module.document_intelligence.endpoint
     Graph__TenantId                = var.tenant_id
     # Schedules disabled in DR region so we don't double-trigger SharePoint sync. Primary owns scheduled fetch.
-    SharePoint__Schedule              = "0 0 0 1 1 0"
-    OneDrive__Schedule                = "0 0 0 1 1 0"
-    Search__CmkKeyVaultUri            = var.cmk_key_vault_uri
-    Search__CmkKeyName                = var.cmk_key_name
-    PrimaryRegion__StorageAccountName = var.primary_storage_account_name
+    SharePoint__Schedule                         = "0 0 0 1 1 0"
+    OneDrive__Schedule                           = "0 0 0 1 1 0"
+    WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID = var.ingestion_user_assigned_identity_id
+    Search__CmkKeyVaultUri                       = var.cmk_key_vault_uri
+    Search__CmkKeyName                           = var.cmk_key_name
+    PrimaryRegion__StorageAccountName            = var.primary_storage_account_name
   }
 }

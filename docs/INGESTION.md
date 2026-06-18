@@ -30,8 +30,7 @@ flowchart LR
     end
 
     subgraph Functions["Ingestion Functions (Timer/EventGrid)"]
-        SPF[SharePointFilesFunction]
-        ODF[OneDriveFilesFunction]
+      DSF[DispatcherFunction]
         IBF[IngestBlobFunction]
         CRF[CurationFunction]
     end
@@ -55,8 +54,8 @@ flowchart LR
         SYN[(Synapse<br/>serverless views)]
     end
 
-    SP --> SPF --> L
-    OD --> ODF --> L
+    SP --> DSF --> L
+    OD --> DSF --> L
     BLB --> L
     AFS --> PAFS --> L
     SQL --> PSQL --> R
@@ -74,8 +73,7 @@ Key components in the codebase:
 
 - [`src/DataAiMcp.Ingestion.Functions/IngestBlobFunction.cs`](../src/DataAiMcp.Ingestion.Functions/IngestBlobFunction.cs) — Document RAG entry point (`landing/` blob → chunks → embeddings → search index)
 - [`src/DataAiMcp.Ingestion.Functions/CurationFunction.cs`](../src/DataAiMcp.Ingestion.Functions/CurationFunction.cs) — Promotes `.parquet` from `raw/` to `curated/`
-- [`src/DataAiMcp.Ingestion.Functions/SharePointFilesFunction.cs`](../src/DataAiMcp.Ingestion.Functions/SharePointFilesFunction.cs) — Timer-driven Graph drives → `landing/`
-- [`src/DataAiMcp.Ingestion.Functions/OneDriveFilesFunction.cs`](../src/DataAiMcp.Ingestion.Functions/OneDriveFilesFunction.cs) — Timer-driven OneDrive drives → `landing/`
+- [`src/DataAiMcp.Ingestion.Functions/DispatcherFunction.cs`](../src/DataAiMcp.Ingestion.Functions/DispatcherFunction.cs) — Timer-driven source dispatcher (`ISourceFetcherFactory`) → `landing/`
 - [`src/DataAiMcp.Ingestion.Functions/Pipeline/DocumentIngestionPipeline.cs`](../src/DataAiMcp.Ingestion.Functions/Pipeline/DocumentIngestionPipeline.cs) — The shared multi-stage pipeline
 - [`src/DataAiMcp.Ingestion.Functions/Graph/GraphFileFetcher.cs`](../src/DataAiMcp.Ingestion.Functions/Graph/GraphFileFetcher.cs) — `securityIds` resolution
 
@@ -183,10 +181,9 @@ Every ingestion-related app-setting key the platform binds today. Settings whose
 | `Search__IndexName` | index writer | `documents` | Functions + MCP app settings |
 | `DocumentIntelligence__Endpoint` | layout extraction | `<deployed>` | Functions app settings |
 | `Graph__BaseUrl` | Graph clients | `https://graph.microsoft.com/v1.0` (use `https://graph.microsoft.us/v1.0` for Gov-cloud) | Functions app settings |
-| `SharePoint__DriveIds` | `SharePointFilesFunction` | `[]` | Functions app settings |
-| `SharePoint__Schedule` | timer trigger | `0 */30 * * * *` | Functions app settings |
-| `OneDrive__DriveIds` | `OneDriveFilesFunction` | `[]` | Functions app settings |
-| `OneDrive__Schedule` | timer trigger | `0 0 */6 * * *` | Functions app settings |
+| `CosmosDb__Endpoint` | `DispatcherFunction` source config store | `<deployed>` | Functions + Portal app settings |
+| `CosmosDb__DatabaseId` | `DispatcherFunction` source config store | `ingestion` | Functions + Portal app settings |
+| `CosmosDb__SourceConfigContainerId` | `DispatcherFunction` source config store | `source-configurations` | Functions + Portal app settings |
 | `Curation__SourcePrefixes` | `CurationFunction` | `[]` | Functions app settings |
 
 The template is at [`src/DataAiMcp.Ingestion.Functions/local.settings.template.json`](../src/DataAiMcp.Ingestion.Functions/local.settings.template.json).
@@ -195,8 +192,8 @@ The template is at [`src/DataAiMcp.Ingestion.Functions/local.settings.template.j
 
 | Source | Cookbook | Mechanism | Lands at | `documents.source` value | Schedule | Auth |
 | --- | --- | --- | --- | --- | --- | --- |
-| SharePoint Files | [sharepoint-files.md](ingestion/sharepoint-files.md) | Function (Graph) | `landing/sharepoint/<drive>/<path>` | `sharepoint` | Timer (default 30 min) | Graph + MI |
-| OneDrive Files | [onedrive-files.md](ingestion/onedrive-files.md) | Function (Graph) | `landing/onedrive/<drive>/<path>` | `onedrive` | Timer (default 6 h) | Graph + MI |
+| SharePoint Files | [sharepoint-files.md](ingestion/sharepoint-files.md) | Dispatcher source fetcher (Graph) | `landing/sharepoint/<drive>/<path>` | `sharepoint` | Dispatcher timer (6h default) | Graph + MI |
+| OneDrive Files | [onedrive-files.md](ingestion/onedrive-files.md) | Dispatcher source fetcher (Graph) | `landing/onedrive/<drive>/<path>` | `onedrive` | Dispatcher timer (6h default) | Graph + MI |
 | Azure File Share | [azure-file-share.md](ingestion/azure-file-share.md) | ADF (`pl_afs_to_adls`) | `landing/afs/<path>` | `afs` | Tumbling window (default 05:00 UTC) | KV-stored AFS storage key + ADF MI |
 | SQL Managed Instance | [sql-managed-instance.md](ingestion/sql-managed-instance.md) | ADF (`pl_sql_mi_to_adls`) | `raw/sqlmi/<schema>.<table>/` | n/a (structured) | Tumbling window (default 04:00 UTC) | ADF MI; operator T-SQL grant |
 | SharePoint Lists | [sharepoint-lists.md](ingestion/sharepoint-lists.md) | ADF (`pl_sharepoint_lists_to_adls`) | `raw/sharepoint-lists/<list>/` | n/a (structured) | Tumbling window (default 06:00 UTC) | AAD app-reg + KV-stored secret |
@@ -217,14 +214,9 @@ az storage fs file upload \
   --overwrite
 ```
 
-### 8.2 Force a full SharePoint resync
+### 8.2 Force a source resync
 
-The `SharePointFilesFunction` keeps no client-side delta state — every run re-walks the configured drives. To force an immediate run, restart the Function app or invoke the function manually:
-
-```bash
-az functionapp function show --name <funcapp> --resource-group <rg> \
-  --function-name SharePointFilesFunction
-```
+The dispatcher runs all enabled sources on its timer and updates per-source run status in the source configuration store. To force an earlier run, restart the Functions app (which causes timers to be re-evaluated) and confirm source state in the Portal `Admin/Sources` page.
 
 ### 8.3 Clear and rebuild the index
 

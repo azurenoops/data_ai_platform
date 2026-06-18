@@ -1,0 +1,49 @@
+@page
+@model DiagnosticsModel
+@{
+    ViewData["Title"] = "Diagnostics";
+}
+
+<div class="row g-3">
+    <div class="col-12">
+        <h1 class="display-6">Deployment Diagnostics</h1>
+        <p class="text-muted">Validate key environment settings and service reachability for support and onboarding.</p>
+    </div>
+
+    <div class="col-12 col-lg-6">
+        <div class="card h-100">
+            <div class="card-header">Configuration Snapshot</div>
+            <div class="card-body">
+                <div><strong>MCP URL:</strong> @Model.McpBaseUrl</div>
+                <div><strong>MCP Audience:</strong> @Model.McpAudience</div>
+                <div><strong>Subscription:</strong> @Model.SubscriptionId</div>
+                <div><strong>Resource Group:</strong> @Model.ResourceGroupName</div>
+                <div><strong>Data Factory:</strong> @Model.DataFactoryName</div>
+                <div><strong>SQL Pipeline:</strong> @Model.SqlPipelineName</div>
+                <div><strong>Storage:</strong> @Model.StorageAccountUrl/@Model.LandingContainerName</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-12 col-lg-6">
+        <div class="card h-100">
+            <div class="card-header">Connectivity Checks</div>
+            <div class="card-body">
+                <form method="post">
+                    <button class="btn btn-primary mb-3" type="submit">Run Diagnostics</button>
+                </form>
+
+                <ul class="mb-0">
+                    <li>MCP health: <strong>@Model.McpHealthStatus</strong></li>
+                    <li>Source catalog tool: <strong>@Model.SourceCatalogStatus</strong></li>
+                    <li>ADF pipeline lookup: <strong>@Model.DataFactoryStatus</strong></li>
+                </ul>
+
+                @if (!string.IsNullOrWhiteSpace(Model.Details))
+                {
+                    <pre class="small border rounded p-2 bg-light mt-3" style="max-height: 40vh; overflow:auto;">@Model.Details</pre>
+                }
+            </div>
+        </div>
+    </div>
+</div>

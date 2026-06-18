@@ -29,6 +29,11 @@ variable "app_service_plan_sku" {
   default = "B1"
 }
 
+variable "mcp_public_network_access_enabled" {
+  type    = bool
+  default = false
+}
+
 variable "app_insights_connection_string" {
   type      = string
   sensitive = true

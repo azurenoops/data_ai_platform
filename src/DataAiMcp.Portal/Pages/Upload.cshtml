@@ -1,0 +1,51 @@
+@page
+@model UploadModel
+@{
+    ViewData["Title"] = "Upload";
+}
+
+<div class="row g-3">
+    <div class="col-12">
+        <h1 class="display-6">Upload to Landing</h1>
+        <p class="text-muted">Upload documents or CSV files to the configured landing container path.</p>
+    </div>
+
+    <div class="col-12 col-lg-8">
+        <div class="card">
+            <div class="card-header">Upload File</div>
+            <div class="card-body">
+                <form method="post" enctype="multipart/form-data">
+                    <div class="mb-3">
+                        <label asp-for="Folder" class="form-label">Landing Folder</label>
+                        <input asp-for="Folder" class="form-control" placeholder="demo/manual-drop" />
+                        <div class="form-text">Optional. Leave empty to upload to container root.</div>
+                    </div>
+                    <div class="mb-3">
+                        <label asp-for="UploadFile" class="form-label">File</label>
+                        <input asp-for="UploadFile" class="form-control" type="file" />
+                    </div>
+                    <button class="btn btn-primary" type="submit">Upload</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-12 col-lg-4">
+        <div class="card h-100">
+            <div class="card-header">Target</div>
+            <div class="card-body">
+                <div><strong>Storage:</strong> @Model.StorageAccountUrl</div>
+                <div><strong>Container:</strong> @Model.LandingContainerName</div>
+            </div>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(Model.ResultMessage))
+    {
+        <div class="col-12">
+            <div class="alert @(Model.IsSuccess ? "alert-success" : "alert-danger")">
+                @Model.ResultMessage
+            </div>
+        </div>
+    }
+</div>

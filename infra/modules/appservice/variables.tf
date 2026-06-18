@@ -48,3 +48,9 @@ variable "virtual_network_subnet_id" {
   type        = string
   default     = null
 }
+
+variable "public_network_access_enabled" {
+  description = "Whether inbound public network access is enabled for the MCP App Service. Keep false for private-only deployments."
+  type        = bool
+  default     = false
+}

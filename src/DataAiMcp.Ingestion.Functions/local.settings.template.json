@@ -13,11 +13,6 @@
     "Search__IndexName": "documents",
     "Foundry__Endpoint": "https://REPLACE.cognitiveservices.azure.com/",
     "Foundry__EmbeddingDeployment": "text-embedding-3-large",
-    "DocumentIntelligence__Endpoint": "https://REPLACE.cognitiveservices.azure.com/",
-    "Graph__TenantId": "REPLACE",
-    "SharePoint__DriveIds": "",
-    "SharePoint__Schedule": "0 */30 * * * *",
-    "OneDrive__DriveIds": "",
-    "OneDrive__Schedule": "0 0 */6 * * *"
+    "DocumentIntelligence__Endpoint": "https://REPLACE.cognitiveservices.azure.com/"
   }
 }

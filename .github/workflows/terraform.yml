@@ -324,6 +324,7 @@ jobs:
           test -f infra/tfout.json
           echo "RESOURCE_GROUP=$(jq -r '.AZURE_RESOURCE_GROUP.value' infra/tfout.json)" >> "$GITHUB_ENV"
           echo "APP_SERVICE_NAME=$(jq -r '.APP_SERVICE_NAME.value' infra/tfout.json)" >> "$GITHUB_ENV"
+          echo "PORTAL_APP_SERVICE_NAME=$(jq -r '.PORTAL_APP_SERVICE_NAME.value' infra/tfout.json)" >> "$GITHUB_ENV"
           echo "FUNCTION_APP_NAME=$(jq -r '.FUNCTION_APP_NAME.value' infra/tfout.json)" >> "$GITHUB_ENV"
           echo "STORAGE_ACCOUNT_NAME=$(jq -r '.STORAGE_ACCOUNT_NAME.value' infra/tfout.json)" >> "$GITHUB_ENV"
           echo "STORAGE_BLOB_ENDPOINT=$(jq -r '.STORAGE_BLOB_ENDPOINT.value' infra/tfout.json)" >> "$GITHUB_ENV"
@@ -345,45 +346,31 @@ jobs:
             /p:UseAppHost=false
           (cd publish/functions && zip -qr ../functions.zip .)
 
+      - name: Build & publish portal
+        run: |
+          dotnet publish src/DataAiMcp.Portal/DataAiMcp.Portal.csproj \
+            --configuration Release \
+            --output publish/portal \
+            /p:UseAppHost=false
+          (cd publish/portal && zip -qr ../portal.zip .)
+
       # Kudu/SCM zip deploy is unreachable when public network access is disabled.
-      # Publish each package to Storage and point WEBSITE_RUN_FROM_PACKAGE at a
-      # signed blob URL so the app runtime fetches the package directly.
-      - name: Upload packages and configure run-from-package URLs
+      # Publish each package to stable blob names and point WEBSITE_RUN_FROM_PACKAGE
+      # to unsigned blob URLs read by each app's managed identity.
+      - name: Upload packages and configure managed-identity run-from-package
         run: |
           set -euo pipefail
 
-          EXPIRY_UTC="$(date -u -d '+30 days' '+%Y-%m-%dT%H:%MZ')"
-          MCP_BLOB_NAME="mcp-server-${GITHUB_SHA}.zip"
-          FUNC_BLOB_NAME="functions-${GITHUB_SHA}.zip"
-
-          MCP_UPLOAD_SAS="$(az storage blob generate-sas \
-            --account-name "${STORAGE_ACCOUNT_NAME}" \
-            --container-name deploy \
-            --name "${MCP_BLOB_NAME}" \
-            --permissions acw \
-            --expiry "${EXPIRY_UTC}" \
-            --https-only \
-            --as-user \
-            --auth-mode login \
-            -o tsv)"
-
-          FUNC_UPLOAD_SAS="$(az storage blob generate-sas \
-            --account-name "${STORAGE_ACCOUNT_NAME}" \
-            --container-name deploy \
-            --name "${FUNC_BLOB_NAME}" \
-            --permissions acw \
-            --expiry "${EXPIRY_UTC}" \
-            --https-only \
-            --as-user \
-            --auth-mode login \
-            -o tsv)"
+          MCP_BLOB_NAME="mcp-server-current.zip"
+          FUNC_BLOB_NAME="functions-current.zip"
+          PORTAL_BLOB_NAME="portal-current.zip"
 
           az storage blob upload \
             --account-name "${STORAGE_ACCOUNT_NAME}" \
             --container-name deploy \
             --name "${MCP_BLOB_NAME}" \
             --file publish/mcp-server.zip \
-            --sas-token "${MCP_UPLOAD_SAS}" \
+            --auth-mode login \
             --overwrite true
 
           az storage blob upload \
@@ -391,43 +378,79 @@ jobs:
             --container-name deploy \
             --name "${FUNC_BLOB_NAME}" \
             --file publish/functions.zip \
-            --sas-token "${FUNC_UPLOAD_SAS}" \
+            --auth-mode login \
             --overwrite true
 
-          MCP_READ_SAS="$(az storage blob generate-sas \
+          az storage blob upload \
             --account-name "${STORAGE_ACCOUNT_NAME}" \
             --container-name deploy \
-            --name "${MCP_BLOB_NAME}" \
-            --permissions r \
-            --expiry "${EXPIRY_UTC}" \
-            --https-only \
-            --as-user \
+            --name "${PORTAL_BLOB_NAME}" \
+            --file publish/portal.zip \
             --auth-mode login \
+            --overwrite true
+
+          MCP_IDENTITY_RESOURCE_ID="$(az webapp identity show \
+            --resource-group "${RESOURCE_GROUP}" \
+            --name "${APP_SERVICE_NAME}" \
+            --query "keys(userAssignedIdentities)[0]" \
             -o tsv)"
 
-          FUNC_READ_SAS="$(az storage blob generate-sas \
-            --account-name "${STORAGE_ACCOUNT_NAME}" \
-            --container-name deploy \
-            --name "${FUNC_BLOB_NAME}" \
-            --permissions r \
-            --expiry "${EXPIRY_UTC}" \
-            --https-only \
-            --as-user \
-            --auth-mode login \
+          FUNC_IDENTITY_RESOURCE_ID="$(az functionapp identity show \
+            --resource-group "${RESOURCE_GROUP}" \
+            --name "${FUNCTION_APP_NAME}" \
+            --query "keys(userAssignedIdentities)[0]" \
             -o tsv)"
 
-          MCP_PACKAGE_URL="${STORAGE_BLOB_ENDPOINT}deploy/${MCP_BLOB_NAME}?${MCP_READ_SAS}"
-          FUNC_PACKAGE_URL="${STORAGE_BLOB_ENDPOINT}deploy/${FUNC_BLOB_NAME}?${FUNC_READ_SAS}"
+          PORTAL_IDENTITY_RESOURCE_ID="$(az webapp identity show \
+            --resource-group "${RESOURCE_GROUP}" \
+            --name "${PORTAL_APP_SERVICE_NAME}" \
+            --query "keys(userAssignedIdentities)[0]" \
+            -o tsv)"
+
+          test -n "${MCP_IDENTITY_RESOURCE_ID}"
+          test -n "${FUNC_IDENTITY_RESOURCE_ID}"
+          test -n "${PORTAL_IDENTITY_RESOURCE_ID}"
+
+          MCP_PACKAGE_URL="${STORAGE_BLOB_ENDPOINT}deploy/${MCP_BLOB_NAME}"
+          FUNC_PACKAGE_URL="${STORAGE_BLOB_ENDPOINT}deploy/${FUNC_BLOB_NAME}"
+          PORTAL_PACKAGE_URL="${STORAGE_BLOB_ENDPOINT}deploy/${PORTAL_BLOB_NAME}"
+
+          # Guardrail: fail fast if a SAS/query string sneaks into run-from-package URLs.
+          if [[ "${MCP_PACKAGE_URL}" == *\?* ]]; then
+            echo "ERROR: MCP package URL contains a query string (SAS is not allowed): ${MCP_PACKAGE_URL}" >&2
+            exit 1
+          fi
+
+          if [[ "${FUNC_PACKAGE_URL}" == *\?* ]]; then
+            echo "ERROR: Functions package URL contains a query string (SAS is not allowed): ${FUNC_PACKAGE_URL}" >&2
+            exit 1
+          fi
+
+          if [[ "${PORTAL_PACKAGE_URL}" == *\?* ]]; then
+            echo "ERROR: Portal package URL contains a query string (SAS is not allowed): ${PORTAL_PACKAGE_URL}" >&2
+            exit 1
+          fi
 
           az webapp config appsettings set \
             --resource-group "${RESOURCE_GROUP}" \
             --name "${APP_SERVICE_NAME}" \
-            --settings WEBSITE_RUN_FROM_PACKAGE="${MCP_PACKAGE_URL}"
+            --settings \
+              WEBSITE_RUN_FROM_PACKAGE="${MCP_PACKAGE_URL}" \
+              WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID="${MCP_IDENTITY_RESOURCE_ID}"
 
           az functionapp config appsettings set \
             --resource-group "${RESOURCE_GROUP}" \
             --name "${FUNCTION_APP_NAME}" \
-            --settings WEBSITE_RUN_FROM_PACKAGE="${FUNC_PACKAGE_URL}"
+            --settings \
+              WEBSITE_RUN_FROM_PACKAGE="${FUNC_PACKAGE_URL}" \
+              WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID="${FUNC_IDENTITY_RESOURCE_ID}"
+
+          az webapp config appsettings set \
+            --resource-group "${RESOURCE_GROUP}" \
+            --name "${PORTAL_APP_SERVICE_NAME}" \
+            --settings \
+              WEBSITE_RUN_FROM_PACKAGE="${PORTAL_PACKAGE_URL}" \
+              WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID="${PORTAL_IDENTITY_RESOURCE_ID}"
 
           # Force restart so both runtimes pick up the new package URL now.
           az webapp restart \
@@ -437,6 +460,10 @@ jobs:
           az functionapp restart \
             --resource-group "${RESOURCE_GROUP}" \
             --name "${FUNCTION_APP_NAME}"
+
+          az webapp restart \
+            --resource-group "${RESOURCE_GROUP}" \
+            --name "${PORTAL_APP_SERVICE_NAME}"
 
       - name: Run postdeploy smoke
         env:

@@ -1,0 +1,240 @@
+@page
+@model DataAiMcp.Portal.Pages.Admin.SourcesModel
+@{
+    ViewData["Title"] = "Manage Data Sources";
+}
+
+<div class="container mt-5">
+    <h1>@ViewData["Title"]</h1>
+    <p class="text-muted">Configure data sources for automatic ingestion into the platform. The dispatcher runs every 6 hours.</p>
+
+    @if (!string.IsNullOrEmpty(Model.SuccessMessage))
+    {
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            @Model.SuccessMessage
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(Model.ErrorMessage))
+    {
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            @Model.ErrorMessage
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+    }
+
+    <div class="row mt-5">
+        <!-- Add Source Form -->
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">Add New Source</h5>
+                </div>
+                <div class="card-body">
+                    <form method="post" asp-page-handler="AddSource">
+                        <div class="mb-3">
+                            <label for="sourceTypeSelect" class="form-label">Source Type</label>
+                            <select id="sourceTypeSelect" name="selectedSourceType" class="form-select" onchange="updateSettingsForm()" required>
+                                <option value="">-- Select Source Type --</option>
+                                @foreach (var sourceType in Model.SupportedSourceTypes)
+                                {
+                                    <option value="@sourceType.SourceType" disabled="@(!sourceType.Implemented)">
+                                        @sourceType.DisplayName
+                                        @if (!sourceType.Implemented) { <text> (Coming soon)</text> }
+                                    </option>
+                                }
+                            </select>
+                            <small class="text-muted d-block mt-1" id="sourceTypeDescription"></small>
+                        </div>
+
+                        <div id="settingsPanel"></div>
+
+                        <div class="mb-3">
+                            <label for="displayName" class="form-label">Display Name (optional)</label>
+                            <input type="text" id="displayName" name="displayName" class="form-control" 
+                                placeholder="e.g., 'Project X OneDrive'" asp-for="DisplayName" />
+                        </div>
+
+                        <button type="submit" class="btn btn-primary">Add Source</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Current Sources List -->
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header bg-secondary text-white">
+                    <h5 class="mb-0">Configured Sources (@Model.Sources.Count)</h5>
+                </div>
+                <div class="card-body">
+                    @if (!Model.Sources.Any())
+                    {
+                        <p class="text-muted">No sources configured yet.</p>
+                    }
+                    else
+                    {
+                        <div class="list-group">
+                            @foreach (var source in Model.Sources.OrderBy(s => s.SourceType).ThenBy(s => s.DisplayName))
+                            {
+                                <div class="list-group-item">
+                                    <div class="d-flex w-100 justify-content-between align-items-start">
+                                        <div class="flex-grow-1">
+                                            <h6 class="mb-1">
+                                                @source.DisplayName
+                                                <span class="badge" style="background-color: @GetSourceTypeColor(source.SourceType)">
+                                                    @source.SourceType
+                                                </span>
+                                            </h6>
+                                            <small class="text-muted d-block">
+                                                Added: @source.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss") UTC
+                                            </small>
+                                            @if (source.LastRunAt.HasValue)
+                                            {
+                                                <small class="text-muted d-block">
+                                                    Last run: @source.LastRunAt.Value.ToString("yyyy-MM-dd HH:mm:ss") UTC
+                                                </small>
+                                            }
+                                            @if (!string.IsNullOrEmpty(source.LastRunStatus))
+                                            {
+                                                <small class="text-muted d-block">
+                                                    Status: @source.LastRunStatus
+                                                </small>
+                                            }
+                                        </div>
+                                        <div class="btn-group" role="group">
+                                            <form method="post" asp-page-handler="ToggleSource" style="display:inline;">
+                                                <input type="hidden" name="id" value="@source.Id" />
+                                                <button type="submit" class="btn btn-sm @(source.Enabled ? "btn-success" : "btn-warning")">
+                                                    @(source.Enabled ? "Enabled" : "Disabled")
+                                                </button>
+                                            </form>
+                                            <form method="post" asp-page-handler="DeleteSource" style="display:inline;">
+                                                <input type="hidden" name="id" value="@source.Id" />
+                                                <button type="submit" class="btn btn-sm btn-danger" 
+                                                    onclick="return confirm('Are you sure you want to delete this source?');">
+                                                    Delete
+                                                </button>
+                                            </form>
+                                        </div>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function updateSettingsForm() {
+    const sourceType = document.getElementById('sourceTypeSelect').value;
+    const panel = document.getElementById('settingsPanel');
+    const descDiv = document.getElementById('sourceTypeDescription');
+
+    panel.innerHTML = '';
+    descDiv.innerHTML = '';
+
+    if (!sourceType) return;
+
+    const sourceTypeInfo = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.SupportedSourceTypes));
+    const info = sourceTypeInfo.find(s => s.sourceType === sourceType);
+
+    if (!info) return;
+
+    descDiv.textContent = info.description;
+
+    if (info.implemented) {
+        const allSettings = [...(info.requiredSettings || []), ...(info.optionalSettings || [])];
+        allSettings.forEach(setting => {
+            const div = document.createElement('div');
+            div.className = 'mb-3';
+
+            let input;
+            if (setting.type === 'password') {
+                input = document.createElement('input');
+                input.type = 'password';
+            } else if (setting.type === 'checkbox') {
+                input = document.createElement('input');
+                input.type = 'checkbox';
+            } else if (setting.type === 'select' && setting.selectOptions) {
+                input = document.createElement('select');
+                input.className = 'form-select';
+                input.appendChild(new Option('-- Select --', ''));
+                setting.selectOptions.forEach(opt => {
+                    input.appendChild(new Option(opt, opt));
+                });
+            } else {
+                input = document.createElement('input');
+                input.type = 'text';
+            }
+
+            input.name = `settings_${setting.key}`;
+            input.className = input.type === 'checkbox' ? 'form-check-input' : 'form-control';
+            input.placeholder = setting.placeholder || '';
+            input.required = setting.required;
+
+            const label = document.createElement('label');
+            label.htmlFor = input.name;
+            label.className = 'form-label';
+            label.textContent = setting.label + (setting.required ? ' *' : '');
+
+            if (setting.type === 'checkbox') {
+                div.innerHTML = '';
+                div.appendChild(input);
+                div.appendChild(label);
+            } else {
+                div.appendChild(label);
+                div.appendChild(input);
+            }
+
+            if (setting.description) {
+                const small = document.createElement('small');
+                small.className = 'text-muted d-block mt-1';
+                small.textContent = setting.description;
+                div.appendChild(small);
+            }
+
+            panel.appendChild(div);
+        });
+    } else {
+        const alert = document.createElement('div');
+        alert.className = 'alert alert-warning';
+        alert.textContent = 'This source type is not yet implemented. Check back soon!';
+        panel.appendChild(alert);
+    }
+}
+</script>
+
+<style>
+.badge {
+    font-size: 0.75rem;
+    padding: 0.25rem 0.5rem;
+    margin-left: 0.5rem;
+}
+
+.list-group-item {
+    border-left: 4px solid #e9ecef;
+}
+
+.btn-group {
+    gap: 0.25rem;
+}
+</style>
+
+@functions {
+    private string GetSourceTypeColor(string sourceType) =>
+        sourceType.ToLower() switch
+        {
+            "onedrive" => "#0078D4",
+            "sharepoint" => "#107C10",
+            "teams" => "#6264A7",
+            "aws-s3" => "#FF9900",
+            "google-drive" => "#4285F4",
+            "afs" => "#0080FF",
+            _ => "#6c757d"
+        };
+}

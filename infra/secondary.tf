@@ -14,6 +14,7 @@ module "secondary" {
   abbrs                                       = local.abbrs
   search_sku                                  = var.search_sku
   app_service_plan_sku                        = var.app_service_plan_sku
+  mcp_public_network_access_enabled           = var.mcp_public_network_access_enabled
   app_insights_connection_string              = module.monitoring.app_insights_connection_string
   mcp_server_user_assigned_identity_id        = module.identity.mcp_server_identity_id
   mcp_server_user_assigned_identity_client_id = module.identity.mcp_server_identity_client_id

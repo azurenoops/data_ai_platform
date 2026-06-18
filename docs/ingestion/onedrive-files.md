@@ -19,9 +19,9 @@ User OneDrive (Online)
     └── Personal drive
             │  Graph: GET /users/{upn}/drive
             ▼
-    OneDriveFilesFunction (Timer, default every 6 hours)
+        DispatcherFunction (Timer, default every 6 hours)
             │
-            ├─ for each drive in OneDrive:DriveIds
+          ├─ for each enabled OneDrive source in Cosmos source-configurations
             ├─ list items via GraphFileFetcher
             ├─ resolve per-item permissions → securityIds
             └─ download → upload to landing/onedrive/<drive>/<path>
@@ -40,7 +40,7 @@ User OneDrive (Online)
 ```
 
 Code:
-- [`src/DataAiMcp.Ingestion.Functions/OneDriveFilesFunction.cs`](../../src/DataAiMcp.Ingestion.Functions/OneDriveFilesFunction.cs)
+- [`src/DataAiMcp.Ingestion.Functions/DispatcherFunction.cs`](../../src/DataAiMcp.Ingestion.Functions/DispatcherFunction.cs)
 - [`src/DataAiMcp.Ingestion.Functions/Graph/GraphFileFetcher.cs`](../../src/DataAiMcp.Ingestion.Functions/Graph/GraphFileFetcher.cs)
 
 ## Required Azure resources & permissions
@@ -55,8 +55,9 @@ Code:
 
 | Key | Where set | Example |
 | --- | --- | --- |
-| `OneDrive__DriveIds` | Functions app settings | `["b!user1...","b!user2..."]` |
-| `OneDrive__Schedule` | Functions app settings | `0 0 */6 * * *` (every 6 hours) |
+| `CosmosDb__Endpoint` | Functions + Portal app settings | `https://<cosmos>.documents.azure.com:443/` |
+| `CosmosDb__DatabaseId` | Functions + Portal app settings | `ingestion` |
+| `CosmosDb__SourceConfigContainerId` | Functions + Portal app settings | `source-configurations` |
 | `Graph__BaseUrl` | Functions app settings | `https://graph.microsoft.com/v1.0` (`.us` for Gov-cloud) |
 
 ## Step-by-step onboarding
@@ -76,15 +77,9 @@ az rest --method GET \
 
 Repeat for each user. Driver IDs are stable across renames and are tied to the user's OneDrive site collection.
 
-### 3. Set the configuration
+### 3. Add the source configuration
 
-```bash
-az functionapp config appsettings set \
-  --name <funcapp> --resource-group <rg> \
-  --settings \
-    'OneDrive__DriveIds=["b!user1...","b!user2..."]' \
-    'OneDrive__Schedule=0 0 */6 * * *'
-```
+Use Portal `Admin/Sources` to add an `onedrive` source with the required settings (`driveIds`).
 
 ### 4. Trigger or wait for the next run
 
@@ -111,8 +106,8 @@ dependencies
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
 | Function logs `403` from Graph | Admin consent not granted, or user's tenant blocks app-only access to OneDrive | Verify admin consent; check Conditional Access policies |
-| Function logs `404` for a drive | User offboarded; drive deleted | Remove the drive ID from `OneDrive__DriveIds` |
-| Function takes a very long time per run | Default `OneDrive__Schedule` is 6h; one user has tens of thousands of files | Use Premium plan or split users across multiple Function apps |
+| Function logs `404` for a drive | User offboarded; drive deleted | Remove the stale drive from the OneDrive source configuration in Portal |
+| Function takes a very long time per run | One source contains very large drives | Split users across multiple OneDrive source configurations |
 | Blob lands but no search hit | `securityIds` empty (fail-closed) | Check user's tenant permissions on the file |
 
 ## Limits and scaling

@@ -37,3 +37,5 @@ TestResults/
 *.tfvars
 *.tfvars.json
 terraform.tfstate.backup
+*.log
+*tfout

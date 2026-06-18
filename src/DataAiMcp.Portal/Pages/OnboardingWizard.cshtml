@@ -1,0 +1,85 @@
+@page
+@model OnboardingWizardModel
+@{
+    ViewData["Title"] = "Onboarding Wizard";
+}
+
+<div class="row g-3">
+    <div class="col-12">
+        <h1 class="display-6">Source Onboarding Wizard</h1>
+        <p class="text-muted">Capture source details, validate required inputs, and follow guided next steps.</p>
+    </div>
+
+    <div class="col-12 col-xl-5">
+        <div class="card h-100">
+            <div class="card-header">Source Inputs</div>
+            <div class="card-body">
+                <form method="post">
+                    <div class="mb-2">
+                        <label asp-for="SourceType" class="form-label">Source Type</label>
+                        <select asp-for="SourceType" class="form-select">
+                            <option value="sharepoint">SharePoint Files</option>
+                            <option value="onedrive">OneDrive Files</option>
+                            <option value="sqlmi">SQL Managed Instance</option>
+                            <option value="dataverse">Dataverse</option>
+                            <option value="blob-drop">Manual Blob Drop</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-2">
+                        <label asp-for="Owner" class="form-label">Data Owner</label>
+                        <input asp-for="Owner" class="form-control" placeholder="team or point of contact" />
+                    </div>
+
+                    <div class="mb-2">
+                        <label asp-for="LocationHint" class="form-label">Source Identifier</label>
+                        <input asp-for="LocationHint" class="form-control" placeholder="drive id, table list, or path" />
+                    </div>
+
+                    <div class="mb-2">
+                        <label asp-for="ScheduleHint" class="form-label">Schedule</label>
+                        <input asp-for="ScheduleHint" class="form-control" placeholder="cron or trigger window" />
+                    </div>
+
+                    <div class="mb-3">
+                        <label asp-for="Notes" class="form-label">Notes</label>
+                        <textarea asp-for="Notes" rows="3" class="form-control" placeholder="constraints, dependencies, approvals"></textarea>
+                    </div>
+
+                    <button class="btn btn-primary" type="submit">Generate Checklist</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-12 col-xl-7">
+        <div class="card">
+            <div class="card-header">Checklist</div>
+            <div class="card-body">
+                @if (Model.Checklist.Count == 0)
+                {
+                    <div class="text-muted">Select a source and generate a checklist.</div>
+                }
+                else
+                {
+                    <ol class="mb-3">
+                        @foreach (var item in Model.Checklist)
+                        {
+                            <li>@item</li>
+                        }
+                    </ol>
+
+                    <div class="border rounded p-3 bg-light">
+                        <div class="fw-semibold mb-1">Suggested Runbook</div>
+                        <div>@Model.RunbookPath</div>
+                    </div>
+                }
+
+                @if (!string.IsNullOrWhiteSpace(Model.ValidationMessage))
+                {
+                    <div class="alert @(Model.IsValidInput ? "alert-success" : "alert-warning") mt-3">@Model.ValidationMessage</div>
+                }
+            </div>
+        </div>
+    </div>
+</div>

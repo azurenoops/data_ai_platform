@@ -1,0 +1,56 @@
+[
+  {
+    "name": "CurateRawDrop",
+    "scriptFile": "DataAiMcp.Ingestion.Functions.dll",
+    "entryPoint": "DataAiMcp.Ingestion.Functions.CurationFunction.RunAsync",
+    "language": "dotnet-isolated",
+    "properties": {
+      "IsCodeless": false
+    },
+    "bindings": [
+      {
+        "name": "cloudEvent",
+        "direction": "In",
+        "type": "eventGridTrigger",
+        "cardinality": "One",
+        "properties": {}
+      }
+    ]
+  },
+  {
+    "name": "DispatcherFunction",
+    "scriptFile": "DataAiMcp.Ingestion.Functions.dll",
+    "entryPoint": "DataAiMcp.Ingestion.Functions.DispatcherFunction.RunAsync",
+    "language": "dotnet-isolated",
+    "properties": {
+      "IsCodeless": false
+    },
+    "bindings": [
+      {
+        "name": "timer",
+        "direction": "In",
+        "type": "timerTrigger",
+        "schedule": "0 0 */6 * * *",
+        "properties": {}
+      }
+    ]
+  },
+  {
+    "name": "IngestBlob",
+    "scriptFile": "DataAiMcp.Ingestion.Functions.dll",
+    "entryPoint": "DataAiMcp.Ingestion.Functions.IngestBlobFunction.RunAsync",
+    "language": "dotnet-isolated",
+    "properties": {
+      "IsCodeless": false
+    },
+    "bindings": [
+      {
+        "name": "cloudEvent",
+        "direction": "In",
+        "type": "eventGridTrigger",
+        "cardinality": "One",
+        "properties": {}
+      }
+    ]
+  }
+]

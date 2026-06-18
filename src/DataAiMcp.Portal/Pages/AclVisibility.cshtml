@@ -1,0 +1,56 @@
+@page
+@model AclVisibilityModel
+@{
+    ViewData["Title"] = "ACL Visibility";
+}
+
+<div class="row g-3">
+    <div class="col-12">
+        <h1 class="display-6">ACL Visibility Panel</h1>
+        <p class="text-muted">Validate what documents are visible for the current signed-in user and inspect claims context.</p>
+    </div>
+
+    <div class="col-12 col-xl-4">
+        <div class="card h-100">
+            <div class="card-header">Current Caller Context</div>
+            <div class="card-body">
+                <div><strong>User:</strong> @Model.UserName</div>
+                <div><strong>Object ID:</strong> @Model.ObjectId</div>
+                <div><strong>Tenant ID:</strong> @Model.TenantId</div>
+                <div class="mt-2"><strong>Groups/roles claims:</strong> @Model.GroupOrRoleClaimCount</div>
+                <div class="small text-muted mt-3">ACL enforcement occurs server-side in MCP using caller claims and indexed security IDs.</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-12 col-xl-8">
+        <div class="card">
+            <div class="card-header">Visibility Probe</div>
+            <div class="card-body">
+                <form method="post" class="row g-2 align-items-end">
+                    <div class="col-12 col-lg-8">
+                        <label asp-for="Query" class="form-label">Query</label>
+                        <input asp-for="Query" class="form-control" placeholder="safety bulletin readiness" />
+                    </div>
+                    <div class="col-12 col-lg-2">
+                        <label asp-for="Top" class="form-label">Top</label>
+                        <input asp-for="Top" class="form-control" type="number" min="1" max="20" />
+                    </div>
+                    <div class="col-12 col-lg-2">
+                        <button class="btn btn-primary w-100" type="submit">Run</button>
+                    </div>
+                </form>
+
+                @if (!string.IsNullOrWhiteSpace(Model.ResultMessage))
+                {
+                    <div class="alert @(Model.IsSuccess ? "alert-success" : "alert-danger") mt-3">@Model.ResultMessage</div>
+                }
+
+                @if (!string.IsNullOrWhiteSpace(Model.ResultPayload))
+                {
+                    <pre class="small border rounded p-3 bg-light mt-2" style="max-height: 50vh; overflow:auto;">@Model.ResultPayload</pre>
+                }
+            </div>
+        </div>
+    </div>
+</div>

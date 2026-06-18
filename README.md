@@ -112,6 +112,8 @@ The full posture, decisions, and pitfalls are documented in [docs/README.md](doc
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Cloud / DevOps engineers running the deployment | Comprehensive step-by-step deployment guide — prerequisites, pre-flight checklist, sovereign-cloud retargeting, Terraform workflow (`bootstrap` → `init` → `apply`), zip-deploy of the apps, manual post-provision steps, troubleshooting, tear-down, RBAC + Graph permissions appendices, signoff checklist. |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Engineers extending or enhancing the platform | How to add MCP tools, ingestion sources, datasets; how to evolve the search index; how to change models, run locally, write tests, ship through CI/CD; coding standards and Definition of Done. |
 | [docs/INGESTION.md](docs/INGESTION.md) + [docs/ingestion/](docs/ingestion/) | Operators onboarding data sources; developers adding source types; SREs investigating ingestion failures | Hub + per-source cookbooks for SharePoint, OneDrive, Azure File Share, SQL MI, SharePoint Lists, Dataverse, manual blob drop; secret-rotation runbook; "adding a source type" cookbook. |
+| [docs/PORTAL-ARCHITECTURE.md](docs/PORTAL-ARCHITECTURE.md) | Platform operators and app engineers | Portal architecture and initial UX scope for MCP onboarding, upload workflows, and SQL pipeline operations. |
+| [docs/PORTAL-FEATURE-BACKLOG.md](docs/PORTAL-FEATURE-BACKLOG.md) | Product owners and customer-enablement teams | Prioritized portal feature roadmap mapped to existing MCP, ingestion, and deployment capabilities. |
 
 ### Source-tree quick links
 

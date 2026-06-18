@@ -42,6 +42,54 @@ variable "app_service_plan_sku" {
   default     = "B1"
 }
 
+variable "mcp_public_network_access_enabled" {
+  description = "Enable inbound public network access for the MCP App Service endpoint."
+  type        = bool
+  default     = false
+}
+
+variable "portal_public_network_access_enabled" {
+  description = "Enable inbound public network access for the Portal App Service endpoint."
+  type        = bool
+  default     = true
+}
+
+variable "portal_azuread_instance" {
+  description = "Microsoft Entra authority instance for portal sign-in (for example https://login.microsoftonline.com/ or https://login.microsoftonline.us/)."
+  type        = string
+  default     = "https://login.microsoftonline.com/"
+}
+
+variable "portal_azuread_tenant_id" {
+  description = "Microsoft Entra tenant ID used by the portal OpenID Connect client. Defaults to the current subscription tenant when empty."
+  type        = string
+  default     = ""
+}
+
+variable "portal_azuread_client_id" {
+  description = "Microsoft Entra app registration client ID for the portal web app (Microsoft.Identity.Web)."
+  type        = string
+  default     = "00000000-0000-0000-0000-000000000000"
+}
+
+variable "cosmos_db_database_name" {
+  description = "Cosmos DB SQL database name for source configuration storage."
+  type        = string
+  default     = "ingestion"
+}
+
+variable "cosmos_db_source_config_container_name" {
+  description = "Cosmos DB SQL container name for source configuration records."
+  type        = string
+  default     = "source-configurations"
+}
+
+variable "cosmos_db_public_network_access_enabled" {
+  description = "Enable public network access for Cosmos DB account."
+  type        = bool
+  default     = true
+}
+
 variable "chat_deployment" {
   description = "Foundry chat model deployment name."
   type        = string
@@ -347,8 +395,26 @@ variable "subnet_pe_address_prefix" {
   default     = "10.42.3.0/24"
 }
 
+# Map of private DNS zone names keyed by service token, forwarded to the network
+# module when use_existing_vnet=false. Defaults target Azure US Government -
+# override the entire map (e.g. in tfvars) to retarget at commercial Azure or
+# another sovereign cloud. Ignored when use_existing_vnet=true (supply
+# existing_private_dns_zone_ids instead).
+variable "private_dns_zone_names" {
+  description = "Map of private DNS zone names keyed by service token, used when Terraform creates the VNet. Defaults are Azure US Government zone names; override the whole map for commercial Azure. Required keys consumed by the private endpoints: 'search' and 'cognitiveservices'."
+  type        = map(string)
+  default = {
+    search            = "privatelink.search.windows.us"
+    cognitiveservices = "privatelink.cognitiveservices.azure.us"
+    blob              = "privatelink.blob.core.usgovcloudapi.net"
+    dfs               = "privatelink.dfs.core.usgovcloudapi.net"
+    vault             = "privatelink.vaultcore.usgovcloudapi.net"
+    sites             = "privatelink.azurewebsites.us"
+  }
+}
+
 variable "use_existing_vnet" {
-  description = "When true, skip creating the VNet, subnets, and private DNS zones. Consume external IDs via the existing_* variables below. Use this in hub-and-spoke topologies where networking is pre-provisioned by a platform team."
+  description = "When true, skip creating the VNet, subnets, and private DNS zones. Consume external IDs via the existing_* variables below. Use this in hub-and-spoke topologies where networking is pre-provisioned by a platform team; the private endpoints still deploy into the supplied subnet."
   type        = bool
   default     = false
 }
@@ -366,13 +432,13 @@ variable "existing_subnet_functions_id" {
 }
 
 variable "existing_subnet_pe_id" {
-  description = "Resource ID of an existing subnet that will host private-endpoint NICs. Required when use_existing_vnet=true. private_endpoint_network_policies SHOULD be Disabled."
+  description = "Resource ID of an existing subnet that will host private-endpoint NICs. Required when use_existing_vnet=true. The PE resources use this subnet directly; private_endpoint_network_policies SHOULD be Disabled."
   type        = string
   default     = null
 }
 
 variable "existing_private_dns_zone_ids" {
-  description = "Map of pre-existing private DNS zone IDs keyed by service token. Required when use_existing_vnet=true. Required keys: 'search' and 'cognitiveservices'. Optional reserved keys for future PE phases: 'blob', 'dfs', 'vault', 'sites'."
+  description = "Map of pre-existing private DNS zone IDs keyed by service token. Required when use_existing_vnet=true. The private endpoints use these IDs directly. Required keys: 'search' and 'cognitiveservices'. Optional reserved keys for future PE phases: 'blob', 'dfs', 'vault', 'sites'."
   type        = map(string)
   default     = {}
 }

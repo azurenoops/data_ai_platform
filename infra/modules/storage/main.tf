@@ -21,6 +21,12 @@ resource "azurerm_storage_account" "this" {
   public_network_access_enabled     = true
   infrastructure_encryption_enabled = local.cmk_enabled
 
+  # CRITICAL: This account backs App Service WEBSITE_RUN_FROM_PACKAGE (Portal + MCP).
+  # If publicNetworkAccess is disabled or defaultAction is Deny, App Service fails to mount
+  # the package ZIP during startup (BadRunFromPackageConfig, 403 during volume mount).
+  # The safe posture is: publicNetworkAccess=Enabled, defaultAction=Allow, bypass=AzureServices.
+  # DO NOT change these settings without redesigning package delivery (e.g., via private
+  # endpoints, ExpressRoute, or different storage path). See docs/DEPLOYMENT.md and repo memory.
   network_rules {
     bypass         = ["AzureServices"]
     default_action = "Allow"
@@ -40,6 +46,18 @@ resource "azurerm_storage_account" "this" {
       key_vault_key_id          = var.cmk_key_uri
       user_assigned_identity_id = var.cmk_user_assigned_identity_id
     }
+  }
+
+  # Prevent accidental drift of network settings away from package-mount-safe posture.
+  # Terraform will always enforce the above network_rules and public_network_access_enabled.
+  # If Azure shows different values, 'terraform plan' will report the diff and 'terraform apply'
+  # will correct it. This ensures the storage account stays accessible for WEBSITE_RUN_FROM_PACKAGE.
+  lifecycle {
+    ignore_changes = [
+      # Azure may modify these after creation; we accept those changes but enforce network_rules
+      # and public_network_access_enabled at all times (see policy above).
+      customer_managed_key,  # Azure may finalize or adjust encryption metadata
+    ]
   }
 
   blob_properties {
