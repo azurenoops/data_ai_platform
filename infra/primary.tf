@@ -361,6 +361,8 @@ module "portal_appservice" {
     CosmosDb__Endpoint                           = module.cosmosdb.endpoint
     CosmosDb__DatabaseId                         = module.cosmosdb.database_name
     CosmosDb__SourceConfigContainerId            = module.cosmosdb.source_config_container_name
+    Foundry__Endpoint                            = local.foundry_account_endpoint
+    Foundry__ChatDeployment                      = var.chat_deployment
     WEBSITE_RUN_FROM_PACKAGE                     = "${module.storage.blob_endpoint}deploy/portal-current.zip"
     WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID = module.identity.portal_identity_id
   }

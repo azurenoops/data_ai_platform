@@ -10,11 +10,108 @@
         <p class="text-muted">Run MCP tools directly from the portal to validate prompts, sources, and structured queries.</p>
     </div>
 
+    <div class="col-12">
+        @Html.AntiForgeryToken()
+        <div class="card border-primary">
+            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-chat-dots me-1"></i>Ask (chat-app preview)</span>
+                <span class="small">Ad hoc natural-language questions &rarr; <code class="text-white">search_documents</code></span>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-2">
+                    This mimics how an MCP-enabled chat assistant uses the server: you type a free-form question, the
+                    assistant calls <code>search_documents</code>, and a Foundry chat model composes a grounded answer
+                    with citations from the retrieved passages. No dataset or tool selection required &mdash; just ask.
+                </p>
+                <div class="d-flex flex-wrap gap-2 mb-2">
+                    <button type="button" class="btn btn-sm btn-outline-secondary js-chat-example">What readiness improvements were reported last quarter?</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary js-chat-example">Which programs are running hot on burn rate?</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary js-chat-example">Show me incidents caused by expired credentials.</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary js-chat-example">Where are inspection failures clustering?</button>
+                </div>
+                <div id="chatLog" class="border rounded p-3 mb-2 bg-light" style="height: 320px; overflow-y: auto;">
+                    <div class="text-muted small" id="chatEmpty">Ask a question to see how the assistant grounds its answer in your sources.</div>
+                </div>
+                <form id="chatForm" class="d-flex gap-2">
+                    <select id="chatSource" class="form-select form-select-sm" style="max-width: 160px;" title="Optional source filter">
+                        <option value="">All sources</option>
+                        <option value="manual">manual</option>
+                        <option value="sql-demo">sql-demo</option>
+                        <option value="sharepoint">sharepoint</option>
+                        <option value="onedrive">onedrive</option>
+                        <option value="afs">afs</option>
+                        <option value="sqlmi">sqlmi</option>
+                        <option value="dataverse">dataverse</option>
+                        <option value="demo">demo</option>
+                    </select>
+                    <input id="chatInput" class="form-control" autocomplete="off"
+                           placeholder="Ask anything about your indexed content…" />
+                    <button id="chatSend" type="submit" class="btn btn-primary">
+                        <span class="spinner-border spinner-border-sm d-none" id="chatSpinner" role="status" aria-hidden="true"></span>
+                        <span id="chatSendLabel">Send</span>
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span>Prompt library</span>
+                <span class="small text-muted">Click a prompt to configure the tool runner and execute it.</span>
+            </div>
+            <div class="card-body">
+                <div class="accordion" id="promptLibrary">
+                    @foreach (var category in PlaygroundModel.PromptCategories)
+                    {
+                        var headingId = $"prompt-heading-{category.Code}";
+                        var collapseId = $"prompt-collapse-{category.Code}";
+                        var expanded = category.Code is "A" or "B";
+                        <div class="accordion-item">
+                            <h2 class="accordion-header" id="@headingId">
+                                <button class="accordion-button @(expanded ? string.Empty : "collapsed")" type="button"
+                                        data-bs-toggle="collapse" data-bs-target="#@collapseId"
+                                        aria-expanded="@(expanded ? "true" : "false")" aria-controls="@collapseId">
+                                    <span class="badge bg-dark me-2">@category.Code</span> @category.Title
+                                </button>
+                            </h2>
+                            <div id="@collapseId" class="accordion-collapse collapse @(expanded ? "show" : string.Empty)"
+                                 aria-labelledby="@headingId" data-bs-parent="#promptLibrary">
+                                <div class="accordion-body">
+                                    <p class="text-muted small mb-2">@category.Description</p>
+                                    @if (!string.IsNullOrWhiteSpace(category.Note))
+                                    {
+                                        <div class="alert alert-info py-1 px-2 small mb-2">@category.Note</div>
+                                    }
+                                    <div class="d-flex flex-wrap gap-2">
+                                        @foreach (var prompt in category.Prompts)
+                                        {
+                                            <button type="button" class="btn btn-sm btn-outline-primary text-start js-prompt-preset"
+                                                    data-tool="@prompt.Tool"
+                                                    data-query="@(prompt.Query ?? string.Empty)"
+                                                    data-question="@(prompt.Question ?? string.Empty)"
+                                                    data-dataset="@(prompt.Dataset ?? string.Empty)"
+                                                    data-source="@(prompt.Source ?? string.Empty)"
+                                                    data-top="@(prompt.Top?.ToString() ?? string.Empty)">
+                                                <span class="badge bg-secondary me-1">@prompt.Tool</span>@prompt.Label
+                                            </button>
+                                        }
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="col-12 col-xl-4">
         <div class="card h-100">
             <div class="card-header">Tool Runner</div>
             <div class="card-body">
-                <form method="post">
+                <form method="post" id="toolForm">
                     <div class="mb-2">
                         <label asp-for="ToolName" class="form-label">Tool</label>
                         <select asp-for="ToolName" class="form-select">
@@ -56,7 +153,10 @@
                         <input asp-for="Top" class="form-control" type="number" min="1" max="25" />
                     </div>
 
-                    <button class="btn btn-primary" type="submit">Run Tool</button>
+                    <button class="btn btn-primary" type="submit" id="runToolBtn">
+                        <span class="spinner-border spinner-border-sm d-none" id="runToolSpinner" role="status" aria-hidden="true"></span>
+                        <span id="runToolLabel">Run Tool</span>
+                    </button>
                 </form>
             </div>
         </div>
@@ -66,6 +166,10 @@
         <div class="card h-100">
             <div class="card-header">Output</div>
             <div class="card-body">
+                <div id="runToolBusy" class="alert alert-info d-none d-flex align-items-center gap-2" role="status">
+                    <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                    <span>Calling the MCP server…</span>
+                </div>
                 @if (!string.IsNullOrWhiteSpace(Model.ResultMessage))
                 {
                     <div class="alert @(Model.IsSuccess ? "alert-success" : "alert-danger")">@Model.ResultMessage</div>
@@ -83,3 +187,220 @@
         </div>
     </div>
 </div>
+
+@section Scripts {
+    <script>
+        (function () {
+            // ---- Tool runner: loading cue + presets ----
+            var form = document.getElementById('toolForm');
+
+            function setValue(id, value) {
+                var el = document.getElementById(id);
+                if (el) { el.value = value || ''; }
+            }
+
+            function showRunBusy() {
+                var busy = document.getElementById('runToolBusy');
+                if (busy) { busy.classList.remove('d-none'); }
+                var spin = document.getElementById('runToolSpinner');
+                if (spin) { spin.classList.remove('d-none'); }
+                var label = document.getElementById('runToolLabel');
+                if (label) { label.textContent = 'Running…'; }
+                var btn = document.getElementById('runToolBtn');
+                if (btn) { btn.disabled = true; }
+            }
+
+            if (form) {
+                form.addEventListener('submit', showRunBusy);
+
+                document.querySelectorAll('.js-prompt-preset').forEach(function (btn) {
+                    btn.addEventListener('click', function () {
+                        var d = btn.dataset;
+                        setValue('ToolName', d.tool);
+                        setValue('Query', d.query);
+                        setValue('Question', d.question);
+                        setValue('Dataset', d.dataset);
+                        setValue('Source', d.source);
+                        setValue('DocumentId', '');
+                        setValue('Top', d.top || '5');
+                        showRunBusy();
+                        form.submit();
+                    });
+                });
+            }
+
+            // ---- Chat (ad hoc) ----
+            var chatForm = document.getElementById('chatForm');
+            if (!chatForm) { return; }
+
+            var chatLog = document.getElementById('chatLog');
+            var chatInput = document.getElementById('chatInput');
+            var chatSource = document.getElementById('chatSource');
+            var chatSend = document.getElementById('chatSend');
+            var chatSpinner = document.getElementById('chatSpinner');
+            var chatSendLabel = document.getElementById('chatSendLabel');
+            var tokenEl = document.querySelector('input[name="__RequestVerificationToken"]');
+
+            function escapeHtml(s) {
+                var d = document.createElement('div');
+                d.textContent = s == null ? '' : String(s);
+                return d.innerHTML;
+            }
+
+            function pick(o, names) {
+                for (var i = 0; i < names.length; i++) {
+                    if (o[names[i]] !== undefined && o[names[i]] !== null) { return o[names[i]]; }
+                }
+                return undefined;
+            }
+
+            function clearEmpty() {
+                var empty = document.getElementById('chatEmpty');
+                if (empty) { empty.remove(); }
+            }
+
+            function appendUser(text) {
+                clearEmpty();
+                var wrap = document.createElement('div');
+                wrap.className = 'd-flex justify-content-end mb-2';
+                wrap.innerHTML = '<div class="bg-primary text-white rounded px-3 py-2" style="max-width: 80%;">' +
+                    escapeHtml(text) + '</div>';
+                chatLog.appendChild(wrap);
+                chatLog.scrollTop = chatLog.scrollHeight;
+            }
+
+            function appendTyping() {
+                var wrap = document.createElement('div');
+                wrap.className = 'd-flex justify-content-start mb-2';
+                wrap.id = 'chatTyping';
+                wrap.innerHTML = '<div class="bg-white border rounded px-3 py-2 text-muted">' +
+                    '<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>' +
+                    'Retrieving from your sources…</div>';
+                chatLog.appendChild(wrap);
+                chatLog.scrollTop = chatLog.scrollHeight;
+            }
+
+            function removeTyping() {
+                var t = document.getElementById('chatTyping');
+                if (t) { t.remove(); }
+            }
+
+            function renderHits(payload) {
+                var hits;
+                try { hits = JSON.parse(payload); } catch (e) { hits = null; }
+                if (!Array.isArray(hits) || hits.length === 0) {
+                    return '';
+                }
+                var html = '';
+                hits.forEach(function (h, i) {
+                    var title = pick(h, ['title', 'Title']) || pick(h, ['documentId', 'DocumentId']) || 'Untitled';
+                    var source = pick(h, ['source', 'Source']) || '';
+                    var page = pick(h, ['page', 'Page']);
+                    var snippet = pick(h, ['snippet', 'Snippet']) || '';
+                    var reranker = pick(h, ['rerankerScore', 'RerankerScore']);
+                    var score = pick(h, ['score', 'Score']);
+                    var shown = (reranker !== undefined ? reranker : score);
+                    var scoreText = (shown !== undefined && shown !== null) ? Number(shown).toFixed(2) : '';
+                    if (snippet.length > 360) { snippet = snippet.substring(0, 360) + '…'; }
+                    html += '<div class="border-start border-3 ps-2 mb-2">' +
+                        '<div class="small"><span class="badge bg-secondary me-1">' + escapeHtml(source) + '</span>' +
+                        '<strong>' + escapeHtml(title) + '</strong>' +
+                        (page ? ' <span class="text-muted">p.' + escapeHtml(page) + '</span>' : '') +
+                        (scoreText ? ' <span class="text-muted">· score ' + escapeHtml(scoreText) + '</span>' : '') +
+                        '</div>' +
+                        '<div class="small text-muted">' + escapeHtml(snippet) + '</div>' +
+                        '</div>';
+                });
+                return html;
+            }
+
+            function renderReply(data) {
+                var hits;
+                try { hits = JSON.parse(data.payload); } catch (e) { hits = null; }
+                var count = Array.isArray(hits) ? hits.length : 0;
+                if (count === 0) {
+                    return '<div class="text-muted">No grounding passages matched that question. Try rephrasing or removing the source filter.</div>';
+                }
+
+                var html = '';
+                if (data.answer) {
+                    html += '<div class="mb-1" style="white-space: pre-wrap;">' + escapeHtml(data.answer) + '</div>';
+                } else {
+                    html += '<div class="mb-1">Found <strong>' + count + '</strong> grounding passage' +
+                        (count === 1 ? '' : 's') + '. An MCP-enabled assistant would summarize these into an answer with citations.</div>';
+                }
+
+                html += '<details class="mt-1"><summary class="small text-primary" style="cursor:pointer;">' +
+                    'Sources (' + count + ')</summary>' +
+                    '<div class="mt-2">' + renderHits(data.payload) + '</div></details>';
+                return html;
+            }
+
+            function appendAssistant(html, isError) {
+                var wrap = document.createElement('div');
+                wrap.className = 'd-flex justify-content-start mb-2';
+                var bubbleClass = isError ? 'bg-white border border-danger text-danger' : 'bg-white border';
+                wrap.innerHTML = '<div class="' + bubbleClass + ' rounded px-3 py-2" style="max-width: 90%;">' +
+                    html + '</div>';
+                chatLog.appendChild(wrap);
+                chatLog.scrollTop = chatLog.scrollHeight;
+            }
+
+            function setChatBusy(busy) {
+                chatSend.disabled = busy;
+                if (busy) { chatSpinner.classList.remove('d-none'); chatSendLabel.textContent = 'Asking…'; }
+                else { chatSpinner.classList.add('d-none'); chatSendLabel.textContent = 'Send'; }
+            }
+
+            async function ask(question) {
+                appendUser(question);
+                appendTyping();
+                setChatBusy(true);
+                try {
+                    var resp = await fetch('?handler=Ask', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'RequestVerificationToken': tokenEl ? tokenEl.value : ''
+                        },
+                        body: JSON.stringify({
+                            question: question,
+                            source: chatSource ? chatSource.value : '',
+                            top: 5
+                        })
+                    });
+                    removeTyping();
+                    if (!resp.ok) {
+                        appendAssistant('Request failed (HTTP ' + resp.status + ').', true);
+                        return;
+                    }
+                    var data = await resp.json();
+                    if (data && data.ok) {
+                        appendAssistant(renderReply(data), false);
+                    } else {
+                        appendAssistant(escapeHtml((data && data.error) || 'Something went wrong.'), true);
+                    }
+                } catch (err) {
+                    removeTyping();
+                    appendAssistant(escapeHtml(err.message || 'Network error.'), true);
+                } finally {
+                    setChatBusy(false);
+                }
+            }
+
+            chatForm.addEventListener('submit', function (e) {
+                e.preventDefault();
+                var q = (chatInput.value || '').trim();
+                if (!q) { return; }
+                chatInput.value = '';
+                ask(q);
+            });
+
+            document.querySelectorAll('.js-chat-example').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    ask(btn.textContent.trim());
+                });
+            });
+        })();
+    </script>
+}

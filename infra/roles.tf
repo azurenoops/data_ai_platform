@@ -30,6 +30,15 @@ resource "azurerm_role_assignment" "portal_data_factory_contributor" {
   principal_type     = "ServicePrincipal"
 }
 
+# Cognitive Services OpenAI User on the Foundry account so the portal can call the
+# chat deployment to synthesize grounded answers in the MCP Playground "Ask" panel.
+resource "azurerm_role_assignment" "portal_foundry_openai_user" {
+  scope              = local.foundry_account_id
+  role_definition_id = "${data.azurerm_subscription.current.id}/providers/Microsoft.Authorization/roleDefinitions/5e0bd9bd-7b93-4f28-af87-19fc36ad61bd"
+  principal_id       = module.identity.portal_principal_id
+  principal_type     = "ServicePrincipal"
+}
+
 resource "azurerm_cosmosdb_sql_role_assignment" "ingestion_source_config_contributor" {
   resource_group_name = azurerm_resource_group.primary.name
   account_name        = module.cosmosdb.account_name

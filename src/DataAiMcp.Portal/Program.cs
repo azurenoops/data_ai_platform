@@ -30,6 +30,7 @@ builder.Services.AddHttpClient<IMcpProbeService, McpProbeService>();
 builder.Services.AddHttpClient<IDataFactoryService, DataFactoryService>();
 builder.Services.AddSingleton<IAudienceTokenProvider, McpAudienceTokenProvider>();
 builder.Services.AddSingleton<IMcpToolService, McpToolService>();
+builder.Services.AddSingleton<IChatAnswerService, ChatAnswerService>();
 builder.Services.AddSingleton<IEnvironmentDiagnosticsService, EnvironmentDiagnosticsService>();
 builder.Services.AddSingleton<IAzureManagementTokenProvider, AzureManagementTokenProvider>();
 builder.Services.AddSingleton<IBlobStorageAdapter, BlobStorageAdapter>();
@@ -64,6 +65,8 @@ builder.Services.PostConfigure<OpenIdConnectOptions>(OpenIdConnectDefaults.Authe
 });
 
 builder.Services.AddAuthorization();
+
+builder.Services.AddAntiforgery(options => options.HeaderName = "RequestVerificationToken");
 
 builder.Services
     .AddRazorPages(options =>
