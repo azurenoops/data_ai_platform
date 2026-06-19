@@ -30,28 +30,29 @@
                             <a class="nav-link" asp-area="" asp-page="/Index">Dashboard</a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" asp-area="" asp-page="/Upload">Upload</a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" asp-area="" asp-page="/SourceCatalog">Source Catalog</a>
-                        </li>
-                        <li class="nav-item">
                             <a class="nav-link" asp-area="" asp-page="/Playground">Playground</a>
                         </li>
-                        <li class="nav-item">
-                            <a class="nav-link" asp-area="" asp-page="/OnboardingWizard">Wizard</a>
+                        <li class="nav-item dropdown">
+                            <a class="nav-link dropdown-toggle" href="#" id="dataMenu" role="button" data-bs-toggle="dropdown" aria-expanded="false">Data</a>
+                            <ul class="dropdown-menu" aria-labelledby="dataMenu">
+                                <li><a class="dropdown-item" asp-area="" asp-page="/Upload">Upload</a></li>
+                                <li><a class="dropdown-item" asp-area="" asp-page="/SourceCatalog">Source Catalog</a></li>
+                                <li><a class="dropdown-item" asp-area="" asp-page="/SqlPipeline">SQL Pipeline</a></li>
+                            </ul>
                         </li>
-                        <li class="nav-item">
-                            <a class="nav-link" asp-area="" asp-page="/AclVisibility">ACL</a>
+                        <li class="nav-item dropdown">
+                            <a class="nav-link dropdown-toggle" href="#" id="onboardingMenu" role="button" data-bs-toggle="dropdown" aria-expanded="false">Onboarding</a>
+                            <ul class="dropdown-menu" aria-labelledby="onboardingMenu">
+                                <li><a class="dropdown-item" asp-area="" asp-page="/OnboardingWizard">Onboarding Wizard</a></li>
+                                <li><a class="dropdown-item" asp-area="" asp-page="/Onboarding">Manage Onboarding</a></li>
+                            </ul>
                         </li>
-                        <li class="nav-item">
-                            <a class="nav-link" asp-area="" asp-page="/Diagnostics">Diagnostics</a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" asp-area="" asp-page="/SqlPipeline">SQL Pipeline</a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" asp-area="" asp-page="/Onboarding">Onboarding</a>
+                        <li class="nav-item dropdown">
+                            <a class="nav-link dropdown-toggle" href="#" id="adminMenu" role="button" data-bs-toggle="dropdown" aria-expanded="false">Admin</a>
+                            <ul class="dropdown-menu" aria-labelledby="adminMenu">
+                                <li><a class="dropdown-item" asp-area="" asp-page="/AclVisibility">ACL Visibility</a></li>
+                                <li><a class="dropdown-item" asp-area="" asp-page="/Diagnostics">Diagnostics</a></li>
+                            </ul>
                         </li>
                     </ul>
                     <ul class="navbar-nav">
