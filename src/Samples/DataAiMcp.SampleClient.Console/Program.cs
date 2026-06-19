@@ -63,6 +63,33 @@ var hits = await client.CallToolAsync("search_documents", new Dictionary<string,
 });
 PrintResult(hits);
 
+Console.WriteLine();
+Console.WriteLine("Calling search_documents(query='projects over budget by sector', source='sql-demo', top=2)...");
+var sqlDemoHits = await client.CallToolAsync("search_documents", new Dictionary<string, object?>
+{
+    ["query"] = "projects over budget by sector and region",
+    ["source"] = "sql-demo",
+    ["top"] = 2,
+});
+PrintResult(sqlDemoHits);
+
+Console.WriteLine();
+Console.WriteLine("Calling describe_dataset(name='projects')...");
+var described = await client.CallToolAsync("describe_dataset", new Dictionary<string, object?>
+{
+    ["name"] = "projects",
+});
+PrintResult(described);
+
+Console.WriteLine();
+Console.WriteLine("Calling query_structured_data(question='Which projects are over budget? Return ProjectName, BudgetUsd, SpentUsd. Top 5.')...");
+var structured = await client.CallToolAsync("query_structured_data", new Dictionary<string, object?>
+{
+    ["question"] = "Which projects are over budget (SpentUsd greater than BudgetUsd)? Return ProjectName, BudgetUsd, SpentUsd ordered by SpentUsd descending. Top 5.",
+    ["dataset"] = "projects",
+});
+PrintResult(structured);
+
 static void PrintResult(CallToolResult result)
 {
     foreach (var content in result.Content)
