@@ -57,11 +57,48 @@
                     <ul class="navbar-nav">
                         @if (User.Identity?.IsAuthenticated ?? false)
                         {
-                            <li class="nav-item">
-                                <span class="nav-link text-light">@User.Identity.Name</span>
-                            </li>
-                            <li class="nav-item">
-                                <a class="nav-link text-light" asp-area="MicrosoftIdentity" asp-controller="Account" asp-action="SignOut">Sign out</a>
+                            var nameClaim = User.FindFirst("name")?.Value;
+                            var upn = User.FindFirst("preferred_username")?.Value ?? User.Identity.Name ?? "";
+                            string friendly;
+                            if (!string.IsNullOrWhiteSpace(nameClaim) && !nameClaim.Contains('@'))
+                            {
+                                friendly = nameClaim;
+                            }
+                            else
+                            {
+                                var local = upn.Split('@')[0];
+                                var words = local.Split(new[] { '.', '_', '-' }, StringSplitOptions.RemoveEmptyEntries);
+                                friendly = string.Join(' ', words.Select(w => char.ToUpperInvariant(w[0]) + w[1..]));
+                                if (string.IsNullOrWhiteSpace(friendly))
+                                {
+                                    friendly = "User";
+                                }
+                            }
+
+                            var tokens = friendly.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                            string initials = tokens.Length switch
+                            {
+                                0 => "U",
+                                1 => new string(tokens[0].Take(2).Select(char.ToUpperInvariant).ToArray()),
+                                _ => $"{char.ToUpperInvariant(tokens[0][0])}{char.ToUpperInvariant(tokens[1][0])}",
+                            };
+
+                            <li class="nav-item dropdown">
+                                <a class="nav-link dropdown-toggle d-flex align-items-center gap-2 portal-user" href="#"
+                                   id="userMenu" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                                    <span class="portal-avatar">@initials</span>
+                                    <span class="d-none d-lg-inline">@friendly</span>
+                                </a>
+                                <ul class="dropdown-menu dropdown-menu-end shadow" aria-labelledby="userMenu">
+                                    <li class="px-3 py-2">
+                                        <div class="fw-semibold text-dark">@friendly</div>
+                                        <div class="small text-muted text-break">@upn</div>
+                                    </li>
+                                    <li><hr class="dropdown-divider" /></li>
+                                    <li>
+                                        <a class="dropdown-item" asp-area="MicrosoftIdentity" asp-controller="Account" asp-action="SignOut">Sign out</a>
+                                    </li>
+                                </ul>
                             </li>
                         }
                     </ul>

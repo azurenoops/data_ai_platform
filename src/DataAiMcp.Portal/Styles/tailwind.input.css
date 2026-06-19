@@ -31,6 +31,8 @@
   body {
     margin: 0;
     min-height: 100vh;
+    display: flex;
+    flex-direction: column;
     color: var(--portal-text);
     font-family: "Outfit", "Segoe UI", sans-serif;
     background:
@@ -107,6 +109,34 @@
 
   .portal-shell {
     max-width: 1040px;
+    flex: 1 0 auto;
+  }
+
+  .portal-avatar {
+    @apply inline-flex items-center justify-center rounded-full;
+    width: 1.95rem;
+    height: 1.95rem;
+    background: linear-gradient(180deg, #11a59b 0%, #0b6f68 100%);
+    color: #fff;
+    font-weight: 700;
+    font-size: 0.78rem;
+    letter-spacing: 0.02em;
+    box-shadow: 0 2px 6px rgba(8, 92, 86, 0.35);
+  }
+
+  .portal-user.dropdown-toggle::after {
+    margin-left: 0.1rem;
+    opacity: 0.7;
+  }
+
+  .portal-user .portal-avatar {
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .portal-user:hover .portal-avatar,
+  .portal-user:focus .portal-avatar {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 14px rgba(8, 92, 86, 0.4);
   }
 
   .card {
@@ -207,8 +237,9 @@
 
   .footer.portal-footer {
     @apply relative;
-    margin-top: 1.7rem;
-    padding: 0.85rem 0;
+    flex-shrink: 0;
+    margin-top: 2.25rem;
+    padding: 1.1rem 0;
     background: transparent;
     border-color: #d6deef !important;
   }
