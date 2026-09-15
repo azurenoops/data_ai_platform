@@ -1,6 +1,6 @@
-# Deployment Guide — NSWC Port Hueneme Division
+# Deployment Guide — Federal Agency
 
-End-to-end, step-by-step procedure for deploying the Data + AI + MCP platform into NSWC PHD's **Flank Speed** (M365 GCC High) tenant and the matching **Azure Government** subscription.
+End-to-end, step-by-step procedure for deploying the Data + AI + MCP platform into a federal agency's **Flank Speed** (M365 GCC High) tenant and the matching **Azure Government** subscription.
 
 This guide is intentionally exhaustive. Read it through once before running any commands — several steps require admin actions outside your control (Graph admin consent, Foundry quota, ATO sign-off) and the lead time on those will dictate your overall schedule.
 
@@ -107,7 +107,7 @@ Before you run any command, confirm every item below. If something is missing, s
 
 ### Operational readiness
 
-- [ ] An **App Insights / Log Analytics** workspace destination is agreed (the Bicep creates one in-region; if NSWC PHD has a central SIEM destination, plan diagnostic-setting forwarding before users arrive).
+- [ ] An **App Insights / Log Analytics** workspace destination is agreed (the Bicep creates one in-region; if the federal agency has a central SIEM destination, plan diagnostic-setting forwarding before users arrive).
 - [ ] A cost owner / cost center is recorded for the subscription.
 - [ ] An on-call point of contact is identified for the platform once it goes live.
 
@@ -121,7 +121,7 @@ These are the parameters and configuration choices you will be asked for. Decide
 
 | Decision | Where it's used | Default | Notes |
 | --- | --- | --- | --- |
-| **`environment_name` (tfvars)** | `terraform workspace new <env>` + `environment_name` in [infra/envs/<env>.tfvars](../infra/envs/) | — | Short, lowercase, no spaces. Becomes part of the resource group name `rg-<environment_name>` and is encoded into resource tags. Examples: `phd-dev`, `phd-pilot`, `phd-prod`. |
+| **`environment_name` (tfvars)** | `terraform workspace new <env>` + `environment_name` in [infra/envs/<env>.tfvars](../infra/envs/) | — | Short, lowercase, no spaces. Becomes part of the resource group name `rg-<environment_name>` and is encoded into resource tags. Examples: `agency-dev`, `agency-pilot`, `agency-prod`. |
 | **Azure Government region** | `AZURE_LOCATION` | — | `usgovvirginia` or `usgovarizona`. Verify all required services + models are GA. |
 | **Subscription ID** | `AZURE_SUBSCRIPTION_ID` | — | Government subscription only. |
 | **Foundry chat deployment** | `chatDeployment` parameter ([infra/main.tf](../infra/main.tf)) | `gpt-4o` | Override if `gpt-4o` is not available in your Gov region on the deploy date. |
@@ -149,7 +149,7 @@ Record all decisions in your pre-deploy notes alongside the [Appendix D](#append
 
 Use a workstation that is:
 
-- Compliant with NSWC PHD / DON device policy for accessing Flank Speed.
+- Compliant with federal agency / DON device policy for accessing Flank Speed.
 - Allowed (by Conditional Access) to perform interactive sign-in to Azure Government.
 - Able to reach `*.usgovcloudapi.net`, `login.microsoftonline.us`, and `graph.microsoft.us`.
 
@@ -356,7 +356,7 @@ terraform workspace new dev      # or: terraform workspace select dev
 Open [infra/envs/dev.tfvars](../infra/envs/dev.tfvars) (or `prod.tfvars`) and set the values you decided in [§3](#3-decisions-to-lock-in-before-you-start):
 
 ```hcl
-environment_name      = "phd-pilot"
+environment_name      = "agency-pilot"
 location              = "usgovvirginia"
 search_sku            = "standard"
 app_service_plan_sku  = "B1"
@@ -620,7 +620,7 @@ az functionapp restart -n "$FUNC" -g "$RG"
 If you decided to expose a named scope (e.g., `MCP.Read`) instead of the default `api://<siteName>` audience, your tenant admin should:
 
 1. Create an **app registration** in Flank Speed Entra.
-2. Set Application ID URI to `api://mcp-phd-<env>` (or your standard).
+2. Set Application ID URI to `api://mcp-agency-<env>` (or your standard).
 3. Expose a scope `MCP.Read` (and optionally `MCP.Admin`).
 4. Add the **App role** `DataAiMcp.Admin` (used by [src/DataAiMcp.McpServer/Program.cs](../src/DataAiMcp.McpServer/Program.cs) for the `AdminTools` policy).
 5. Assign user/group membership through Conditional Access.
@@ -630,7 +630,7 @@ Then update the App Service settings:
 ```bash
 APP="$(terraform -chdir=infra output -raw APP_SERVICE_NAME)"
 az webapp config appsettings set -n "$APP" -g "$RG" --settings \
-  Auth__Audience="api://mcp-phd-<env>" \
+  Auth__Audience="api://mcp-agency-<env>" \
   Auth__TenantId="$TENANT"
 ```
 

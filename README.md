@@ -1,18 +1,18 @@
-# Data + AI + MCP Platform — NSWC Port Hueneme Division
+# Data + AI + MCP Platform — Federal Agency
 
-> A turnkey, **Flank Speed**-aligned reference platform that unifies the documents and structured engineering data scattered across **Naval Surface Warfare Center, Port Hueneme Division (NSWC PHD)** behind a single secure **Model Context Protocol (MCP)** endpoint — so any approved AI client can answer grounded, cited questions about combat-system in-service engineering, lifecycle logistics, fleet readiness, and technical guidance.
+> A turnkey, **Navy**-aligned reference platform that unifies the documents and structured engineering data scattered across a **federal agency** behind a single secure **Model Context Protocol (MCP)** endpoint — so any approved AI client can answer grounded, cited questions about combat-system in-service engineering, lifecycle logistics, fleet readiness, and technical guidance.
 
 ---
 
 ## What this is
 
-A single, governed Azure platform that lets NSWC PHD staff and their AI assistants ask questions across the warfare center's data — and get back grounded answers with citations — without each department, program office, or contractor team standing up a one-off "AI on my data" project.
+A single, governed Azure platform that lets federal agency staff and their AI assistants ask questions across the agency's data — and get back grounded answers with citations — without each department, program office, or contractor team standing up a one-off "AI on my data" project.
 
-It's built on Microsoft technology that **already** lives inside the warfare center's tenant: **Flank Speed** (M365 GCC High), **Azure Government**, **Microsoft 365 Copilot–compatible MCP**, and **Microsoft AI Foundry**. There is nothing custom about the stack — only how it is wired together for NSWC PHD's mission.
+It's built on Microsoft technology that **already** lives inside the agency's tenant: **Flank Speed** (M365 GCC High), **Azure Government**, **Microsoft 365 Copilot–compatible MCP**, and **Microsoft AI Foundry**. There is nothing custom about the stack — only how it is wired together for the agency's mission.
 
 It is delivered as **infrastructure-as-code** ([infra/](infra)) plus a small, focused **.NET 9 codebase** ([src/](src)) that:
 
-- **Ingests** documents and tabular data from the systems NSWC PHD already operates — Flank Speed SharePoint and OneDrive, Azure SQL Managed Instance, Dataverse, Azure Files / ADLS.
+- **Ingests** documents and tabular data from the systems the federal agency already operates — Flank Speed SharePoint and OneDrive, Azure SQL Managed Instance, Dataverse, Azure Files / ADLS.
 - **Curates and indexes** them in-tenant — text into Azure AI Search, structured tables into Synapse serverless SQL views over Parquet.
 - **Exposes** the unified corpus through one Entra-protected MCP endpoint that any compliant AI client can call.
 
@@ -22,13 +22,13 @@ You run `terraform apply` once, against an authorized Azure Government subscript
 
 ## Why it exists
 
-Today, the systems that hold NSWC PHD's most valuable engineering knowledge — technical manuals, ISEA work packages, OPNAV / SECNAV / NAVSEA instructions, SHIPALTs and OrdAlts, ECPs, PMS feedback, CASREPs, ILS records, distance-support cases, range and test data — are spread across **separate** SharePoint libraries, drives, databases, and file shares.
+Today, the systems that hold the federal agency's most valuable engineering knowledge — technical manuals, ISEA work packages, OPNAV / SECNAV / NAVSEA instructions, SHIPALTs and OrdAlts, ECPs, PMS feedback, CASREPs, ILS records, distance-support cases, range and test data — are spread across **separate** SharePoint libraries, drives, databases, and file shares.
 
 **None of that data is currently reachable through an AI surface.** Every cross-system question is answered the same way: a person opens SharePoint, opens a SQL client, opens Dataverse, opens a file share, and stitches the answer together by hand. Engineers and analysts spend hours on lookups that the data already supports, the same questions get researched repeatedly across departments, and there is no governed, reusable path for any future copilot or AI assistant the command's leadership might want to stand up.
 
 That gap is exactly what the **CDAO**, **Task Force Lima**, and **DON CIO AI guidance** call out: don't let every team build its own bespoke AI-on-our-data stack. Build one governed platform. Reuse it.
 
-This repository is that platform, scoped to NSWC PHD's mission.
+This repository is that platform, scoped to the federal agency's mission.
 
 ---
 
@@ -40,7 +40,7 @@ This repository is that platform, scoped to NSWC PHD's mission.
 | **In-Service Engineering Agents (ISEAs)** | Surface the right ISEA work package, the parent OPNAV instruction, and the related ECPs from a single natural-language prompt. |
 | **Logistics & supply analysts** | Run NL → T-SQL queries against curated 3M / PMS / ILS data and see the generated SQL alongside the rows — every answer is auditable. |
 | **Distance-support analysts** | Pull case-tracking context and engineering documentation in one turn for fleet inquiries. |
-| **NSWC PHD IT / N6 / ISSM** | Authorize the AI surface area **once** and let multiple departments and program offices consume it — instead of reviewing one bespoke RAG app per team. |
+| **Federal agency IT / N6 / ISSM** | Authorize the AI surface area **once** and let multiple departments and program offices consume it — instead of reviewing one bespoke RAG app per team. |
 | **Program offices & contractors** | Build copilots against a sanctioned, governed endpoint — no need to stand up indexing, embedding, search, or auth from scratch. |
 | **Architects & solution engineers** | Use a working reference for MCP as the integration contract for an internal AI surface, including the migration path to Azure Government for higher impact levels. |
 
@@ -50,13 +50,13 @@ Every answer is **grounded with citations** (hybrid BM25 + vector + semantic-rer
 
 ## What it can do today
 
-Once deployed, NSWC PHD staff (or their AI clients) can ask questions like:
+Once deployed, federal agency staff (or their AI clients) can ask questions like:
 
 - *"Summarize the latest safety bulletin for the combat system I'm working on and link to the source."*
 - *"Show me open Priority-1 CASREPs against the systems this division is the ISEA for, in the last 30 days."*
-- *"For ships in availability supported by NSWC PHD this quarter, list the open ECPs and any associated ISEA technical guidance."*
+- *"For ships in availability supported by the federal agency this quarter, list the open ECPs and any associated ISEA technical guidance."*
 - *"What does OPNAVINST 5100.19 say about confined-space entry, and which warfare-center SOPs reference it?"*
-- *"What sources are connected, and what fields are available on `nswc_phd_casreps`?"*
+- *"What sources are connected, and what fields are available on `federal_agency_casreps`?"*
 
 The platform answers them through five MCP tools:
 
@@ -108,7 +108,7 @@ The full posture, decisions, and pitfalls are documented in [docs/README.md](doc
 
 | Document | Audience | Purpose |
 | --- | --- | --- |
-| [docs/README.md](docs/README.md) | NSWC PHD leadership, IT, ISSM/ISSO, data owners, architects | What the platform is, the problem it solves at the warfare center, decisions that must be made before deploy, and the pitfalls to avoid in Flank Speed / Azure Government. |
+| [docs/README.md](docs/README.md) | Federal agency leadership, IT, ISSM/ISSO, data owners, architects | What the platform is, the problem it solves at the agency, decisions that must be made before deploy, and the pitfalls to avoid in Flank Speed / Azure Government. |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Cloud / DevOps engineers running the deployment | Comprehensive step-by-step deployment guide — prerequisites, pre-flight checklist, sovereign-cloud retargeting, Terraform workflow (`bootstrap` → `init` → `apply`), zip-deploy of the apps, manual post-provision steps, troubleshooting, tear-down, RBAC + Graph permissions appendices, signoff checklist. |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Engineers extending or enhancing the platform | How to add MCP tools, ingestion sources, datasets; how to evolve the search index; how to change models, run locally, write tests, ship through CI/CD; coding standards and Definition of Done. |
 | [docs/INGESTION.md](docs/INGESTION.md) + [docs/ingestion/](docs/ingestion/) | Operators onboarding data sources; developers adding source types; SREs investigating ingestion failures | Hub + per-source cookbooks for SharePoint, OneDrive, Azure File Share, SQL MI, SharePoint Lists, Dataverse, manual blob drop; secret-rotation runbook; "adding a source type" cookbook. |
@@ -147,7 +147,7 @@ The full posture, decisions, and pitfalls are documented in [docs/README.md](doc
 - [Department of Defense Chief Digital and Artificial Intelligence Office (CDAO)](https://www.ai.mil/)
 - [Task Force Lima — DoD Generative AI Task Force](https://www.defense.gov/News/Releases/Release/Article/3489803/dod-announces-establishment-of-generative-ai-task-force/)
 - [DON CIO — AI guidance and policy resources](https://www.doncio.navy.mil/)
-- [Naval Surface Warfare Center, Port Hueneme Division](https://www.navsea.navy.mil/Home/Warfare-Centers/NSWC-Port-Hueneme/)
+- Federal agency policies and mission guidance
 - [Microsoft Azure Government documentation](https://learn.microsoft.com/azure/azure-government/)
 - [Microsoft 365 GCC High (Flank Speed) overview](https://learn.microsoft.com/microsoft-365/enterprise/microsoft-365-gcchigh-mapping)
 - [Microsoft AI Foundry documentation](https://learn.microsoft.com/azure/ai-foundry/)

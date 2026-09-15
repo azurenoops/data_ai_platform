@@ -1,6 +1,6 @@
-# Data + AI + MCP Platform — Naval Surface Warfare Center, Port Hueneme Division (NSWC PHD)
+# Data + AI + MCP Platform — Federal Agency
 
-> A turnkey Azure reference platform that unifies the unstructured documents and structured engineering & logistics data spread across **NSWC Port Hueneme Division** behind a single secure **Model Context Protocol (MCP)** endpoint — so any LLM, agent, or copilot used by the warfare center can answer grounded questions about combat-system in-service engineering, lifecycle logistics, fleet readiness, and technical guidance without bespoke integration work for each system.
+> A turnkey Azure reference platform that unifies the unstructured documents and structured engineering & logistics data spread across a **federal agency** behind a single secure **Model Context Protocol (MCP)** endpoint — so any LLM, agent, or copilot used by the agency can answer grounded questions about combat-system in-service engineering, lifecycle logistics, fleet readiness, and technical guidance without bespoke integration work for each system.
 
 > **Scope note.** This reference architecture is intended to be deployed into **Flank Speed** (the DON's Microsoft 365 GCC High tenant) and the matching **Azure Government** subscription it federates with. It targets **unclassified CUI workloads** at IL4 / IL5. Classified data on SIPR / JWICS is out of scope. The Terraform modules are region-agnostic and deploy into Azure Government with the same `terraform apply` invocation, but several config touch-points (Graph base URL, Entra authority, model availability) must be set to their US-Gov sovereign equivalents — see [Decisions you need to make before `terraform apply`](#decisions-you-need-to-make-before-azd-up) and [Pitfalls — read this section twice](#pitfalls--read-this-section-twice) below.
 
@@ -8,9 +8,9 @@
 
 ## The problem at the warfare center
 
-NSWC Port Hueneme Division — the Navy's **In-Service Engineering Agent (ISEA)** for a large portfolio of surface-ship combat and weapon systems, and the lifecycle logistics center responsible for sustaining them — runs on data that is fragmented across a lot of authoritative systems:
+A federal agency responsible for in-service engineering and lifecycle logistics across a large portfolio of mission systems runs on data that is fragmented across many authoritative systems:
 
-- **NAVSEA / NSWC PHD technical documentation, technical manuals, ISEA work packages, SHIPALTs, OrdAlts, ECPs, PMS feedback, TRDs** in SharePoint Online libraries hosted in **Flank Speed** (M365 GCC High).
+- **Federal agency technical documentation, technical manuals, ISEA work packages, SHIPALTs, OrdAlts, ECPs, PMS feedback, and TRDs** in SharePoint Online libraries hosted in **Flank Speed** (M365 GCC High).
 - **OPNAV / SECNAV / NAVSEA instructions, command policies, safety bulletins, and warfare-center SOPs** in Flank Speed SharePoint libraries and OneDrive working drafts.
 - **Maintenance and logistics records** (3M / PMS data, fleet casualty reports, ILS records, supply transactions) landed nightly into Azure SQL Managed Instance from authoritative systems.
 - **Engineering tickets, distance-support cases, and program-office tracking data** in Dataverse / Power Platform apps used by the warfare center's departments.
@@ -22,14 +22,14 @@ Today, none of this is reachable through an AI surface. Every question that cros
 
 This repository is a single deployable solution that:
 
-1. **Ingests** documents and tabular data from the systems NSWC PHD already uses — Flank Speed SharePoint / OneDrive, SQL MI, Dataverse, Azure Files, and any drop-folder source.
+1. **Ingests** documents and tabular data from the systems the federal agency already uses — Flank Speed SharePoint / OneDrive, SQL MI, Dataverse, Azure Files, and any drop-folder source.
 2. **Curates and indexes** the data inside the warfare center's Azure Government tenant — text into Azure AI Search, tables into Synapse serverless SQL views over Parquet in ADLS Gen2.
 3. **Exposes** the unified corpus through one Entra-protected MCP server so any compliant client (GitHub Copilot, VS Code, Microsoft 365 Copilot agents, custom bots, the official MCP SDKs) can call it.
-4. **Secures** every hop with Entra ID, user-assigned managed identities, least-privilege RBAC, optional customer-managed-key (CMK) encryption, and full Application Insights traces — aligned to the controls an NSWC PHD ISSM / ISSO will look at.
+4. **Secures** every hop with Entra ID, user-assigned managed identities, least-privilege RBAC, optional customer-managed-key (CMK) encryption, and full Application Insights traces — aligned to the controls a federal agency ISSM / ISSO will look at.
 
 You run `terraform apply` once. You get a production-shaped, mission-aligned data + AI + MCP stack inside the warfare center's own subscription.
 
-## Why it matters for NSWC PHD
+## Why it matters for a federal agency
 
 | Capability | What it means for the warfare center |
 | --- | --- |
@@ -39,11 +39,11 @@ You run `terraform apply` once. You get a production-shaped, mission-aligned dat
 | **Stays inside your tenant** | The model talks to the MCP server, the MCP server talks to your data — your CUI / FOUO content does not leave the warfare center's Azure boundary. |
 | **Governed by default** | Entra JWT on `/mcp`, managed identities for every service-to-service hop, role-based access, optional CMK, Key Vault, App Insights — the controls an ATO package needs to check. |
 | **Operationally complete** | Terraform IaC (15 modules + remote state bootstrap), GitHub Actions OIDC pipelines (no client secrets, plan-on-PR + environment-gated apply), smoke tests, post-deploy hooks, and clean tear-down — not a science project. |
-| **Extensible by NSWC PHD teams** | New tools are a class drop-in; new sources are an ADF copy activity or a blob upload to `landing/`. |
+| **Extensible by federal agency teams** | New tools are a class drop-in; new sources are an ADF copy activity or a blob upload to `landing/`. |
 
 ## What you can do with it
 
-Once deployed, NSWC PHD staff (or their copilots) can ask things like:
+Once deployed, federal agency staff (or their copilots) can ask things like:
 
 > *"Summarize the latest safety bulletin for the combat system I'm working on and link to the source."*
 > → `search_documents` returns chunks from the SharePoint-ingested PDF with citations back to the Flank Speed document library.
@@ -51,13 +51,13 @@ Once deployed, NSWC PHD staff (or their copilots) can ask things like:
 > *"Show me open Priority-1 casualty reports against the systems this division is the ISEA for, in the last 30 days."*
 > → `query_structured_data` translates the question to T-SQL, runs it against the curated SQL MI snapshot via Synapse serverless, and returns rows + the SQL it generated for the analyst to inspect.
 
-> *"For ships in availability supported by NSWC PHD this quarter, list the open ECPs and any associated ISEA technical guidance."*
+> *"For ships in availability supported by the federal agency this quarter, list the open ECPs and any associated ISEA technical guidance."*
 > → The agent calls `query_structured_data` *and* `search_documents` in the same turn, joining structured availability data with unstructured engineering documents.
 
 > *"What does OPNAVINST 5100.19 say about confined-space entry, and which warfare-center SOPs reference it?"*
 > → Pure document RAG via `search_documents`, with citations across both the OPNAV instruction and the local SOP that inherits from it.
 
-> *"What sources are connected, and what fields are available on `nswc_phd_casreps`?"*
+> *"What sources are connected, and what fields are available on `federal_agency_casreps`?"*
 > → `list_sources` and `describe_dataset` give the agent (and the user) a self-describing catalog so they don't have to guess schema.
 
 The five MCP tools shipped today:
@@ -72,11 +72,11 @@ The five MCP tools shipped today:
 
 Add warfare-center-specific tools by dropping a class into `src/DataAiMcp.McpServer/Tools/` and registering it in `Program.cs`. The MCP framework picks it up automatically — useful for things like a `lookup_nsn` tool against the supply system, a `get_pms_schedule` tool against 3M, a `lookup_isea_work_package` tool against the engineering library, or a `query_distance_support` tool against the case management system.
 
-## What gets connected at NSWC PHD
+## What gets connected at the federal agency
 
-Out of the box the platform pulls from the systems most NSWC PHD departments already operate inside their Flank Speed / Azure Government subscription:
+Out of the box the platform pulls from the systems most federal agency departments already operate inside their Flank Speed / Azure Government subscription:
 
-- **Flank Speed SharePoint Online (M365 GCC High)** — NSWC PHD technical documentation libraries, ISEA work-package sites, command instructions, warfare-center SOPs, safety bulletins. Microsoft Graph endpoints live on `graph.microsoft.us`, not `graph.microsoft.com`.
+- **Flank Speed SharePoint Online (M365 GCC High)** — federal agency technical documentation libraries, ISEA work-package sites, command instructions, agency SOPs, and safety bulletins. Microsoft Graph endpoints live on `graph.microsoft.us`, not `graph.microsoft.com`.
 - **Flank Speed OneDrive for Business** — engineer working drafts and staff documents (with command policy on what may be ingested; OneDrive content is often pre-decisional and a frequent source of accidental over-sharing).
 - **Dataverse (GCC High)** — engineering tickets, distance-support cases, and program-office tracking apps built on Power Platform.
 - **Azure SQL Managed Instance** — nightly Parquet snapshots of CASREPs, 3M / PMS, ILS, and supply tables.
@@ -129,8 +129,8 @@ For a deeper look at how each data source flows in, see the **[Ingestion guide](
 
 ## Who it's for
 
-- **NSWC PHD departments** (Combat Systems, In-Service Engineering, Logistics, Distance Support, Test & Evaluation, etc.) that want a sanctioned "AI on top of our engineering data" pattern they can hand to product teams instead of letting each team build its own.
-- **NSWC PHD IT / N6 / ISSM staff** who need an AI surface area they can authorize once and let multiple departments and programs consume — instead of reviewing one bespoke RAG app per team.
+- **Federal agency departments** (Combat Systems, In-Service Engineering, Logistics, Distance Support, Test & Evaluation, etc.) that want a sanctioned "AI on top of our engineering data" pattern they can hand to product teams instead of letting each team build its own.
+- **Federal agency IT / N6 / ISSM staff** who need an AI surface area they can authorize once and let multiple departments and programs consume — instead of reviewing one bespoke RAG app per team.
 - **Program-office and contractor application teams** building copilots or chat experiences who need grounded answers without standing up their own indexing stack.
 - **Architects and SEs** evaluating MCP as the integration contract for the warfare center's internal AI surface area, including the migration path to Azure Government for higher impact levels.
 
@@ -141,8 +141,8 @@ Deploying into Flank Speed / Azure Government is not "the same as commercial wit
 ### Tenant & subscription
 
 - **Azure Government subscription** — confirm the command has (or can get) an **Azure Government** subscription federated with the Flank Speed Entra tenant. Commercial Azure subscriptions cannot consume Flank Speed identities cleanly and will not satisfy IL4/IL5 boundary requirements.
-- **Subscription scoping** — decide whether this lands in a per-department subscription, a directorate-shared subscription, or an NSWC PHD-wide platform subscription. This drives ATO boundary, billing, and who can grant the role assignments [infra/modules/roleassignments/main.tf](../infra/modules/roleassignments/main.tf) creates.
-- **Resource group naming / tagging** — align with NSWC PHD's existing naming standards before the first `terraform apply`; the resource-group name is encoded into the deployment and is not trivial to change.
+- **Subscription scoping** — decide whether this lands in a per-department subscription, a directorate-shared subscription, or an agency-wide platform subscription. This drives ATO boundary, billing, and who can grant the role assignments [infra/modules/roleassignments/main.tf](../infra/modules/roleassignments/main.tf) creates.
+- **Resource group naming / tagging** — align with the federal agency's existing naming standards before the first `terraform apply`; the resource-group name is encoded into the deployment and is not trivial to change.
 
 ### Region & service availability
 
@@ -179,8 +179,8 @@ Deploying into Flank Speed / Azure Government is not "the same as commercial wit
 
 ### Operations & assurance
 
-- **ATO posture** — is this a **standalone ATO**, an **ATO inheritance** from a parent platform (e.g., a NAVSEA / NSWC enterprise environment), or **RMF Type-Authorize** of the pattern itself? This drives the artifacts you need to produce alongside the code.
-- **Audit log destination** — App Insights and Log Analytics are deployed by default. Decide whether logs need to ship to NSWC PHD's SIEM (Splunk, Sentinel-Gov, etc.) and configure the diagnostic settings before users hit the system.
+- **ATO posture** — is this a **standalone ATO**, an **ATO inheritance** from a parent platform (e.g., a federal enterprise environment), or **RMF Type-Authorize** of the pattern itself? This drives the artifacts you need to produce alongside the code.
+- **Audit log destination** — App Insights and Log Analytics are deployed by default. Decide whether logs need to ship to the federal agency's SIEM (Splunk, Sentinel-Gov, etc.) and configure the diagnostic settings before users hit the system.
 - **Backup & DR** — `secondaryLocation` enables multi-region in Gov as well, but only if the second region has the same service availability as the primary. Decide if DR is required or if RTO/RPO can be met by re-ingestion.
 
 ## Pitfalls — read this section twice
@@ -191,9 +191,9 @@ These are the failures most likely to bite a Flank Speed / Azure Government depl
 
 2. **Foundry model availability gaps.** Don't assume the model named in `chat_deployment` exists in your chosen Gov region. Provisioning will *succeed* with a deployment of the wrong model name (Terraform doesn't know better), but `query_structured_data` will fail at runtime with a model-not-found error. Verify model availability in the Azure Government model catalog **before** running `terraform apply`.
 
-3. **Graph permissions admin consent.** Graph application permissions (`Sites.Read.All`, `Files.Read.All`) require **Flank Speed tenant admin consent**. NSWC PHD cannot self-consent. Plan for a multi-day cycle to get admin consent through the appropriate DON CIO / Flank Speed support channel; do not start the project assuming you can grant this yourself.
+3. **Graph permissions admin consent.** Graph application permissions (`Sites.Read.All`, `Files.Read.All`) require **Flank Speed tenant admin consent**. The federal agency cannot self-consent. Plan for a multi-day cycle to get admin consent through the appropriate DON CIO / Flank Speed support channel; do not start the project assuming you can grant this yourself.
 
-4. **Ingesting the wrong tenant scope.** It is trivially easy to set `SharePoint__DriveIds` to a drive that contains data NSWC PHD did not intend to expose to AI (or that belongs to another command sharing the tenant). The tools you ship will happily search across whatever was indexed. Treat the connector configuration as a controlled artifact: gate it through the same review NSWC PHD applies to data-sharing agreements, and start with a single explicitly-named pilot library.
+4. **Ingesting the wrong tenant scope.** It is trivially easy to set `SharePoint__DriveIds` to a drive that contains data the federal agency did not intend to expose to AI (or that belongs to another organization sharing the tenant). The tools you ship will happily search across whatever was indexed. Treat the connector configuration as a controlled artifact: gate it through the same review the federal agency applies to data-sharing agreements, and start with a single explicitly-named pilot library.
 
 5. **OneDrive over-collection.** OneDrive for Business often contains pre-decisional drafts, personnel-action documents, and content the user copied from email. Even with a narrow drive list, indexing a OneDrive into a shared search index can over-share content across the tenant. Default position should be **OneDrive ingestion off** until a clear use case + ISSM sign-off exists.
 
@@ -207,7 +207,7 @@ These are the failures most likely to bite a Flank Speed / Azure Government depl
 
 10. **No security trimming today.** As shipped, every authenticated caller can query every indexed chunk. If the corpus contains documents the calling user would not have access to in SharePoint, you have an over-share. Until ACL-aware trimming is implemented, the safe operating mode is: **only ingest documents the entire authorized user population is already cleared to read.**
 
-11. **Re-ingestion cost surprises.** Switching the embedding model means re-embedding every chunk. Across NSWC PHD's full technical-documentation corpus this is non-trivial in tokens and dollars. Pick the embedding model (and dimension) once, write it down in the ATO artifacts, and treat it as a versioned decision.
+11. **Re-ingestion cost surprises.** Switching the embedding model means re-embedding every chunk. Across the federal agency's full technical-documentation corpus this is non-trivial in tokens and dollars. Pick the embedding model (and dimension) once, write it down in the ATO artifacts, and treat it as a versioned decision.
 
 12. **Shadow copies in `landing/`.** The `landing/` container is the easiest extensibility seam — and the easiest place to land a file that should not have been ingested. Apply lifecycle management (auto-delete after N days), enable storage diagnostic logging, and review who has write access to the container as part of the deploy checklist.
 
@@ -248,17 +248,17 @@ In other words: the Zero Trust *boundary* is the Flank Speed tenant; the Zero Tr
 
 ## Cost shape
 
-Default SKUs (`B1` App Service Plan, `standard` AI Search, Flex-Consumption Functions, serverless Synapse, pay-as-you-go Foundry) target a low-cost evaluation footprint suitable for a single NSWC PHD department POC. Every SKU is a Bicep parameter — scale up for a warfare-center-wide production deployment by overriding `AZURE_APP_SERVICE_PLAN_SKU`, `AZURE_SEARCH_SKU`, and the Foundry deployment names.
+Default SKUs (`B1` App Service Plan, `standard` AI Search, Flex-Consumption Functions, serverless Synapse, pay-as-you-go Foundry) target a low-cost evaluation footprint suitable for a single federal agency department POC. Every SKU is a Bicep parameter — scale up for an agency-wide production deployment by overriding `AZURE_APP_SERVICE_PLAN_SKU`, `AZURE_SEARCH_SKU`, and the Foundry deployment names.
 
 The largest variable cost is Foundry token consumption: embeddings paid once per document chunk during ingestion, and chat completions paid per user question during `query_structured_data`. Both are bounded and observable through App Insights — you can set alerts before any team's usage runs away.
 
 ## What's next
 
-- **Walk the decisions list** — work through [Decisions you need to make before `terraform apply`](#decisions-you-need-to-make-before-azd-up) with NSWC PHD's IT, ISSM, and data owners *before* provisioning anything. Most of these decisions are cheap to get right up front and expensive to change later.
+- **Walk the decisions list** — work through [Decisions you need to make before `terraform apply`](#decisions-you-need-to-make-before-azd-up) with the federal agency's IT, ISSM, and data owners *before* provisioning anything. Most of these decisions are cheap to get right up front and expensive to change later.
 - **Stand it up in Azure Government** — follow the step-by-step deployment guide in the root [README.md](../README.md), substituting the `.us` sovereign-cloud endpoints called out in the [Pitfalls](#pitfalls--read-this-section-twice) section.
 - **Plug in the warfare center's data** — point the Flank Speed SharePoint / OneDrive / Dataverse / SQL MI connectors at the specific sites and tables an owning department has authorized in writing. Start with one library and one table; add more incrementally.
-- **Connect a client** — register `https://<your-app>.azurewebsites.us/mcp` (or your Private Endpoint hostname) in the MCP client NSWC PHD has approved. CAC-backed Entra sign-in via Flank Speed flows automatically.
+- **Connect a client** — register `https://<your-app>.azurewebsites.us/mcp` (or your Private Endpoint hostname) in the MCP client the federal agency has approved. CAC-backed Entra sign-in via Flank Speed flows automatically.
 - **Extend it** — add MCP tools for warfare-center-specific systems (CMMS / 3M lookups, NSN search, ISEA work-package search, distance-support case lookup), additional Synapse views, or new ingestion sources. The seams are deliberate.
-- **Validate the Gov-cloud configuration end-to-end** — once deployed, confirm Graph calls hit `graph.microsoft.us`, Entra tokens come from `login.microsoftonline.us`, Foundry deployments exist in your chosen Gov region, and your dev workstations can actually reach the Gov endpoints from the NSWC PHD network.
+- **Validate the Gov-cloud configuration end-to-end** — once deployed, confirm Graph calls hit `graph.microsoft.us`, Entra tokens come from `login.microsoftonline.us`, Foundry deployments exist in your chosen Gov region, and your dev workstations can actually reach the Gov endpoints from the federal agency network.
 
-This is a starting point, not a black box. Every Bicep module, ingestion pipeline, and MCP tool is yours to read, fork, and adapt to the specific mission of NSWC Port Hueneme Division.
+This is a starting point, not a black box. Every Bicep module, ingestion pipeline, and MCP tool is yours to read, fork, and adapt to the federal agency's specific mission.

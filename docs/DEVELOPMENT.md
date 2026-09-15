@@ -526,8 +526,8 @@ Three artifacts must move together: the **Synapse view** (DDL), the **dataset ca
 Add a file to [infra/synapse/views](../infra/synapse/views):
 
 ```sql
--- vw_nswc_phd_casreps.sql
-CREATE OR ALTER VIEW dbo.vw_nswc_phd_casreps AS
+-- vw_federal_agency_casreps.sql
+CREATE OR ALTER VIEW dbo.vw_federal_agency_casreps AS
 SELECT
     casrep_id,
     hull,
@@ -549,9 +549,9 @@ Add an entry to `Datasets` in [src/DataAiMcp.McpServer/appsettings.json](../src/
 
 ```jsonc
 {
-  "Name": "nswc_phd_casreps",
-  "Description": "Open and historical Casualty Reports for systems NSWC PHD is the ISEA for.",
-  "ViewName": "vw_nswc_phd_casreps",
+  "Name": "federal_agency_casreps",
+    "Description": "Open and historical Casualty Reports for systems the federal agency is the ISEA for.",
+  "ViewName": "vw_federal_agency_casreps",
   "Columns": [
     { "Name": "casrep_id", "DataType": "nvarchar(50)", "Description": "Casualty report id." },
     { "Name": "hull", "DataType": "nvarchar(20)", "Description": "Hull number." },
@@ -571,7 +571,7 @@ Add an entry to `Datasets` in [src/DataAiMcp.McpServer/appsettings.json](../src/
 
 ```bash
 eval "$(terraform -chdir=infra output -json | jq -r 'to_entries[] | "export " + .key + "=" + (.value.value | @sh)')"
-sed "s/__STORAGE_ACCOUNT__/${STORAGE_ACCOUNT_NAME}/g" infra/synapse/views/vw_nswc_phd_casreps.sql \
+sed "s/__STORAGE_ACCOUNT__/${STORAGE_ACCOUNT_NAME}/g" infra/synapse/views/vw_federal_agency_casreps.sql \
   | sqlcmd -S "${SYNAPSE_SERVERLESS_SQL_ENDPOINT}" -G -d master
 ```
 
@@ -588,8 +588,8 @@ az webapp restart -n "$(terraform -chdir=infra output -raw APP_SERVICE_NAME)" -g
 Use the sample client:
 
 ```
-> tools/call describe_dataset { "name": "nswc_phd_casreps" }
-> tools/call query_structured_data { "question": "Open Priority 1 CASREPs in the last 30 days", "dataset": "nswc_phd_casreps" }
+> tools/call describe_dataset { "name": "federal_agency_casreps" }
+> tools/call query_structured_data { "question": "Open Priority 1 CASREPs in the last 30 days", "dataset": "federal_agency_casreps" }
 ```
 
 The `query_structured_data` response includes `generatedSql` so you can inspect the model's output before trusting it.
@@ -672,7 +672,7 @@ There is no "re-embed only" path today. The simplest approach: drop the old inde
 Cost considerations:
 
 - Re-embedding scales with token count of the entire corpus.
-- For a large NSWC PHD corpus (technical manuals, instructions, ISEA work packages), this is non-trivial. Get a token estimate before kicking it off.
+- For a large federal agency corpus (technical manuals, instructions, ISEA work packages), this is non-trivial. Get a token estimate before kicking it off.
 
 ### 11.6 Update tests
 
